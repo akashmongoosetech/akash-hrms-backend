@@ -23,6 +23,8 @@ app.use('/api/holidays', require('./routes/holidays'));
 app.use('/api/events', require('./routes/events'));
 app.use('/api/clients', require('./routes/clients'));
 app.use('/api/projects', require('./routes/projects'));
+app.use('/api/todos', require('./routes/todos'));
+app.use('/api/tickets', require('./routes/tickets'));
 
 // example protected route
 const authenticate = require('./middleware/auth');
