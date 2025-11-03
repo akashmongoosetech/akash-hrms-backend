@@ -25,6 +25,7 @@ app.use('/api/clients', require('./routes/clients'));
 app.use('/api/projects', require('./routes/projects'));
 app.use('/api/todos', require('./routes/todos'));
 app.use('/api/tickets', require('./routes/tickets'));
+app.use('/api/comments', require('./routes/comments'));
 
 // example protected route
 const authenticate = require('./middleware/auth');
