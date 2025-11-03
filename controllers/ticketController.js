@@ -25,7 +25,8 @@ const getTickets = async (req, res) => {
 const getTicketById = async (req, res) => {
   try {
     const ticket = await Ticket.findById(req.params.id)
-      .populate('employee', 'firstName lastName email');
+      .populate('employee', 'firstName lastName email')
+      .populate('progress.updatedBy', 'firstName lastName');
     if (!ticket) return res.status(404).json({ message: 'Ticket not found' });
 
     // Check if user is Employee and not the assigned employee
@@ -79,10 +80,38 @@ const updateTicket = async (req, res) => {
       return res.status(403).json({ message: 'Forbidden: You can only update your own tickets' });
     }
 
-    const updatedTicket = await Ticket.findByIdAndUpdate(id, updates, { new: true, runValidators: true })
-      .populate('employee', 'firstName lastName email');
+    // Handle progress updates
+    if (updates.progressUpdate) {
+      const { date, workingHours, progress } = updates.progressUpdate;
 
-    res.json({ message: 'Ticket updated successfully', ticket: updatedTicket });
+      // For employees, add to progress array
+      if (req.user.role === 'Employee') {
+        ticket.progress.push({
+          date: date || new Date(),
+          workingHours: workingHours || 0,
+          progress: progress || 0,
+          updatedBy: req.user.id
+        });
+        ticket.currentProgress = progress || ticket.currentProgress;
+      } else {
+        // For admins/superadmins, directly set current progress
+        ticket.currentProgress = updates.currentProgress || ticket.currentProgress;
+      }
+
+      delete updates.progressUpdate;
+      delete updates.currentProgress;
+    }
+
+    // Update other fields
+    Object.assign(ticket, updates);
+
+    await ticket.save();
+    await ticket.populate([
+      { path: 'employee', select: 'firstName lastName email' },
+      { path: 'progress.updatedBy', select: 'firstName lastName' }
+    ]);
+
+    res.json({ message: 'Ticket updated successfully', ticket });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error', error: err.message });
