@@ -89,6 +89,25 @@ const updateTicket = async (req, res) => {
 
       // For employees, add to progress array
       if (req.user.role === 'Employee') {
+        // Validation: Cannot update progress below current progress
+        if (progress < ticket.currentProgress) {
+          return res.status(400).json({ message: 'Cannot update progress below current progress' });
+        }
+
+        // Get the last updated date
+        let lastUpdatedDate;
+        if (ticket.progress && ticket.progress.length > 0) {
+          lastUpdatedDate = new Date(ticket.progress[ticket.progress.length - 1].date);
+        } else {
+          lastUpdatedDate = new Date(ticket.createdAt);
+        }
+
+        const selectedDate = new Date(date);
+        // Validation: Cannot update progress before the last updated date
+        if (selectedDate <= lastUpdatedDate) {
+          return res.status(400).json({ message: 'You cannot update progress before the last updated date.' });
+        }
+
         ticket.progress.push({
           date: date || new Date(),
           workingHours: workingHours || 0,
@@ -98,6 +117,9 @@ const updateTicket = async (req, res) => {
         ticket.currentProgress = progress || ticket.currentProgress;
       } else {
         // For admins/superadmins, directly set current progress
+        if (updates.currentProgress < ticket.currentProgress) {
+          return res.status(400).json({ message: 'Cannot update progress below current progress' });
+        }
         ticket.currentProgress = updates.currentProgress || ticket.currentProgress;
       }
 
@@ -113,6 +135,13 @@ const updateTicket = async (req, res) => {
       { path: 'employee', select: 'firstName lastName email' },
       { path: 'progress.updatedBy', select: 'firstName lastName role' }
     ]);
+
+    // Emit real-time progress update to all connected clients for this ticket
+    const io = req.app.get('io');
+    io.emit(`ticket-progress-${id}`, {
+      type: 'progress_update',
+      ticket: ticket
+    });
 
     res.json({ message: 'Ticket updated successfully', ticket });
   } catch (err) {
