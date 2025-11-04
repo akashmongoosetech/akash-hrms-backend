@@ -43,6 +43,7 @@ const userSchema = new mongoose.Schema({
   upworkProfile: String,
   resume: String,
   role: { type: String, enum: ['Employee', 'Admin', 'SuperAdmin'], default: 'Employee' },
+  department: { type: mongoose.Schema.Types.ObjectId, ref: 'Department' },
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);

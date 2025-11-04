@@ -77,6 +77,14 @@ const createTodo = async (req, res) => {
       .populate('employee', 'firstName lastName email')
       .populate('createdBy', 'firstName lastName');
 
+    // Emit real-time notification to the employee
+    const io = req.app.get('io');
+    io.emit(`todo-notification-${employee}`, {
+      type: 'new_todo',
+      message: `New todo assigned: ${title}`,
+      todo: populatedTodo
+    });
+
     res.status(201).json({ message: 'Todo created successfully', todo: populatedTodo });
   } catch (err) {
     console.error(err);

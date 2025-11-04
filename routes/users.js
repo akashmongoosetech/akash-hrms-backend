@@ -22,8 +22,8 @@ router.get('/:id', authenticate, authorizeRoles('Employee'), userController.getU
 // Create new user - Admin and SuperAdmin only
 router.post('/', authenticate, authorizeRoles('Admin'), cpUpload, userController.createUser);
 
-// Update user - Admin and SuperAdmin only
-router.put('/:id', authenticate, authorizeRoles('Admin'), cpUpload, userController.updateUser);
+// Update user - Employee (own profile) or Admin and SuperAdmin only
+router.put('/:id', authenticate, authorizeRoles('Employee'), cpUpload, userController.updateUser);
 
 // Delete user - SuperAdmin only
 router.delete('/:id', authenticate, authorizeRoles('SuperAdmin'), userController.deleteUser);

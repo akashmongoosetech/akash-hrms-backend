@@ -25,14 +25,9 @@ const getTickets = async (req, res) => {
 const getTicketById = async (req, res) => {
   try {
     const ticket = await Ticket.findById(req.params.id)
-      .populate('employee', 'firstName lastName email')
-      .populate('progress.updatedBy', 'firstName lastName');
+      .populate('employee', 'firstName lastName email photo')
+      .populate('progress.updatedBy', 'firstName lastName role');
     if (!ticket) return res.status(404).json({ message: 'Ticket not found' });
-
-    // Check if user is Employee and not the assigned employee
-    if (req.user.role === 'Employee' && ticket.employee._id.toString() !== req.user.id) {
-      return res.status(403).json({ message: 'Forbidden: You can only view your own tickets' });
-    }
 
     res.json(ticket);
   } catch (err) {
@@ -60,6 +55,14 @@ const createTicket = async (req, res) => {
     const ticket = new Ticket(ticketData);
     await ticket.save();
 
+    // Emit real-time notification to the employee
+    const io = req.app.get('io');
+    io.emit(`ticket-notification-${employee}`, {
+      type: 'new_ticket',
+      message: `New ticket assigned: ${title}`,
+      ticket: ticket
+    });
+
     res.status(201).json({ message: 'Ticket created successfully', ticket });
   } catch (err) {
     console.error(err);
@@ -76,7 +79,7 @@ const updateTicket = async (req, res) => {
     if (!ticket) return res.status(404).json({ message: 'Ticket not found' });
 
     // Check if user is Employee and not the assigned employee
-    if (req.user.role === 'Employee' && ticket.employee.toString() !== req.user.id) {
+    if (req.user.role === 'Employee' && ticket.employee.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: 'Forbidden: You can only update your own tickets' });
     }
 
@@ -108,7 +111,7 @@ const updateTicket = async (req, res) => {
     await ticket.save();
     await ticket.populate([
       { path: 'employee', select: 'firstName lastName email' },
-      { path: 'progress.updatedBy', select: 'firstName lastName' }
+      { path: 'progress.updatedBy', select: 'firstName lastName role' }
     ]);
 
     res.json({ message: 'Ticket updated successfully', ticket });

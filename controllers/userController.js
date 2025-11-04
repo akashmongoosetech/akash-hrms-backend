@@ -3,15 +3,22 @@ const User = require('../models/User');
 
 const getUsers = async (req, res) => {
   try {
-    let users;
-    if (req.user.role === 'Employee') {
-      // Employees can only see other employees
-      users = await User.find({ role: 'Employee' }, '-password').sort({ createdAt: -1 });
-    } else {
-      // Admins and SuperAdmins can see all users
-      users = await User.find({}, '-password').sort({ createdAt: -1 });
-    }
-    res.json(users);
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const totalUsers = await User.countDocuments();
+    const users = await User.find({}, '-password').populate('department').sort({ createdAt: -1 }).skip(skip).limit(limit);
+
+    res.json({
+      users,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(totalUsers / limit),
+        totalItems: totalUsers,
+        itemsPerPage: limit
+      }
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
@@ -20,7 +27,7 @@ const getUsers = async (req, res) => {
 
 const getUserById = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id, '-password');
+    const user = await User.findById(req.params.id, '-password').populate('department');
     if (!user) return res.status(404).json({ message: 'User not found' });
     res.json(user);
   } catch (err) {
@@ -32,10 +39,63 @@ const getUserById = async (req, res) => {
 const updateUser = async (req, res) => {
   try {
     const { id } = req.params;
-    const updates = req.body;
+    let updates = req.body;
 
-    // Prevent updating password through this endpoint
-    delete updates.password;
+    // Check if user is trying to update their own profile or has admin privileges
+    const isOwnProfile = req.user._id.toString() === id;
+    const isAdminOrSuperAdmin = ['Admin', 'SuperAdmin'].includes(req.user.role);
+
+    if (!isOwnProfile && !isAdminOrSuperAdmin) {
+      return res.status(403).json({ message: 'Forbidden: insufficient permissions' });
+    }
+
+    // If user is updating their own profile, restrict certain fields
+    if (isOwnProfile && !isAdminOrSuperAdmin) {
+      // Employees can only update non-sensitive fields
+      const allowedFields = [
+        'firstName', 'lastName', 'email', 'gender', 'dob', 'mobile1', 'mobile2',
+        'address1', 'address2', 'emergencyContact1', 'emergencyContact2', 'emergencyContact3',
+        'skillsFrontend', 'skillsBackend', 'bankAccountName', 'bankAccountNo', 'bankName',
+        'ifscCode', 'bankAddress', 'aadharCardNumber', 'drivingLicenseNumber', 'panCardNumber',
+        'facebook', 'twitter', 'linkedin', 'instagram', 'upworkProfile'
+      ];
+
+      // Filter updates to only allowed fields
+      const filteredUpdates = {};
+      for (const field of allowedFields) {
+        if (Object.prototype.hasOwnProperty.call(updates, field)) {
+          filteredUpdates[field] = updates[field];
+        }
+      }
+      updates = filteredUpdates;
+    }
+
+    // Parse JSON fields if they are strings
+    if (updates.skillsFrontend && typeof updates.skillsFrontend === 'string') {
+      updates.skillsFrontend = JSON.parse(updates.skillsFrontend);
+    }
+    if (updates.skillsBackend && typeof updates.skillsBackend === 'string') {
+      updates.skillsBackend = JSON.parse(updates.skillsBackend);
+    }
+    if (updates.salaryDetails && typeof updates.salaryDetails === 'string') {
+      updates.salaryDetails = JSON.parse(updates.salaryDetails);
+    }
+
+    // Handle file uploads
+    if (req.files) {
+      if (req.files['aadharCardFile']) updates.aadharCardFile = req.files['aadharCardFile'][0].path;
+      if (req.files['panCardFile']) updates.panCardFile = req.files['panCardFile'][0].path;
+      if (req.files['drivingLicenseFile']) updates.drivingLicenseFile = req.files['drivingLicenseFile'][0].path;
+      if (req.files['resume']) updates.resume = req.files['resume'][0].path;
+      if (req.files['photo']) updates.photo = req.files['photo'][0].path;
+    }
+
+    // Handle password update
+    if (updates.password && updates.password.trim() !== '') {
+      updates.password = await bcrypt.hash(updates.password, 10);
+    } else {
+      delete updates.password; // Don't update if empty
+    }
 
     // Role hierarchy check: only SuperAdmin can assign SuperAdmin role
     if (updates.role && updates.role === 'SuperAdmin' && req.user.role !== 'SuperAdmin') {
@@ -107,7 +167,7 @@ const createUser = async (req, res) => {
       }
     }
 
-    const hashed = await bcrypt.hash(password, 12);
+    const hashed = await bcrypt.hash(password, 10);
 
     const userData = {
       firstName, lastName, email, gender, dob, joiningDate,

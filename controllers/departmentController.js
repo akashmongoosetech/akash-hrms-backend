@@ -2,8 +2,22 @@ const Department = require('../models/Department');
 
 const getDepartments = async (req, res) => {
   try {
-    const departments = await Department.find().sort({ createdAt: -1 });
-    res.json(departments);
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const totalDepartments = await Department.countDocuments();
+    const departments = await Department.find().sort({ createdAt: -1 }).skip(skip).limit(limit);
+
+    res.json({
+      departments,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(totalDepartments / limit),
+        totalItems: totalDepartments,
+        itemsPerPage: limit
+      }
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });

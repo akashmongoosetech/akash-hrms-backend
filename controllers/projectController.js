@@ -2,9 +2,15 @@ const Project = require('../models/Project');
 
 const getProjects = async (req, res) => {
   try {
-    const projects = await Project.find()
-      .populate('client', 'name email')
-      .populate('teamMembers', 'firstName lastName email')
+    let query = {};
+    if (req.user.role === 'Employee') {
+      query = { teamMembers: req.user._id };
+    }
+    // For Admin and SuperAdmin, no filter (show all)
+
+    const projects = await Project.find(query)
+      .populate('client', 'name email profile')
+      .populate('teamMembers', 'firstName lastName email photo')
       .sort({ createdAt: -1 });
     res.json(projects);
   } catch (err) {
@@ -16,8 +22,8 @@ const getProjects = async (req, res) => {
 const getProjectById = async (req, res) => {
   try {
     const project = await Project.findById(req.params.id)
-      .populate('client', 'name email')
-      .populate('teamMembers', 'firstName lastName email');
+      .populate('client', 'name email profile')
+      .populate('teamMembers', 'firstName lastName email photo');
     if (!project) return res.status(404).json({ message: 'Project not found' });
     res.json(project);
   } catch (err) {
@@ -60,8 +66,8 @@ const updateProject = async (req, res) => {
     const updates = req.body;
 
     const project = await Project.findByIdAndUpdate(id, updates, { new: true, runValidators: true })
-      .populate('client', 'name email')
-      .populate('teamMembers', 'firstName lastName email');
+      .populate('client', 'name email profile')
+      .populate('teamMembers', 'firstName lastName email photo');
     if (!project) return res.status(404).json({ message: 'Project not found' });
 
     res.json({ message: 'Project updated successfully', project });

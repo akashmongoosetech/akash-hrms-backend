@@ -1,4 +1,5 @@
 const Event = require('../models/Event');
+const User = require('../models/User');
 
 const getEvents = async (req, res) => {
   try {
@@ -31,6 +32,19 @@ const createEvent = async (req, res) => {
 
     const event = new Event({ name, date });
     await event.save();
+
+    // Get all employees to send notifications
+    const employees = await User.find({ role: 'Employee' });
+
+    // Emit real-time notification to all employees
+    const io = req.app.get('io');
+    employees.forEach(employee => {
+      io.emit(`event-notification-${employee._id}`, {
+        type: 'new_event',
+        message: `New event: ${name}`,
+        event: event
+      });
+    });
 
     res.status(201).json({ message: 'Event created successfully', event });
   } catch (err) {

@@ -1,8 +1,17 @@
 const Holiday = require('../models/Holiday');
+const User = require('../models/User');
 
 const getHolidays = async (req, res) => {
   try {
-    const holidays = await Holiday.find().sort({ date: 1 });
+    const search = req.query.search || '';
+
+    let query = {};
+    if (search) {
+      query.name = { $regex: search, $options: 'i' };
+    }
+
+    const holidays = await Holiday.find(query).sort({ date: 1 });
+
     res.json(holidays);
   } catch (err) {
     console.error(err);
@@ -32,6 +41,19 @@ const createHoliday = async (req, res) => {
     const holiday = new Holiday({ name, date });
     await holiday.save();
 
+    // Get all employees to send notifications
+    const employees = await User.find({ role: 'Employee' });
+
+    // Emit real-time notification to all employees
+    const io = req.app.get('io');
+    employees.forEach(employee => {
+      io.emit(`holiday-notification-${employee._id}`, {
+        type: 'new_holiday',
+        message: `New holiday: ${name}`,
+        holiday: holiday
+      });
+    });
+
     res.status(201).json({ message: 'Holiday created successfully', holiday });
   } catch (err) {
     console.error(err);
@@ -47,6 +69,19 @@ const updateHoliday = async (req, res) => {
     const holiday = await Holiday.findByIdAndUpdate(id, updates, { new: true, runValidators: true });
     if (!holiday) return res.status(404).json({ message: 'Holiday not found' });
 
+    // Get all employees to send notifications
+    const employees = await User.find({ role: 'Employee' });
+
+    // Emit real-time notification to all employees
+    const io = req.app.get('io');
+    employees.forEach(employee => {
+      io.emit(`holiday-notification-${employee._id}`, {
+        type: 'updated_holiday',
+        message: `Holiday updated: ${holiday.name}`,
+        holiday: holiday
+      });
+    });
+
     res.json({ message: 'Holiday updated successfully', holiday });
   } catch (err) {
     console.error(err);
@@ -60,6 +95,19 @@ const deleteHoliday = async (req, res) => {
 
     const holiday = await Holiday.findByIdAndDelete(id);
     if (!holiday) return res.status(404).json({ message: 'Holiday not found' });
+
+    // Get all employees to send notifications
+    const employees = await User.find({ role: 'Employee' });
+
+    // Emit real-time notification to all employees
+    const io = req.app.get('io');
+    employees.forEach(employee => {
+      io.emit(`holiday-notification-${employee._id}`, {
+        type: 'deleted_holiday',
+        message: `Holiday deleted: ${holiday.name}`,
+        holiday: holiday
+      });
+    });
 
     res.json({ message: 'Holiday deleted successfully' });
   } catch (err) {

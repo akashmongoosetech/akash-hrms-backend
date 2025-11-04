@@ -2,8 +2,22 @@ const Client = require('../models/Client');
 
 const getClients = async (req, res) => {
   try {
-    const clients = await Client.find().sort({ createdAt: -1 });
-    res.json(clients);
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const totalClients = await Client.countDocuments();
+    const clients = await Client.find().sort({ createdAt: -1 }).skip(skip).limit(limit);
+
+    res.json({
+      clients,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(totalClients / limit),
+        totalItems: totalClients,
+        itemsPerPage: limit
+      }
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
