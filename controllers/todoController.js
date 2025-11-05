@@ -8,13 +8,13 @@ const getTodos = async (req, res) => {
     if (req.user.role === 'Employee') {
       // Employees can only see their own todos
       todos = await Todo.find({ employee: req.user._id })
-        .populate('employee', 'firstName lastName email')
+        .populate('employee', 'firstName lastName email photo')
         .populate('createdBy', 'firstName lastName')
         .sort({ createdAt: -1 });
     } else {
       // Admins and SuperAdmins can see all todos
       todos = await Todo.find({})
-        .populate('employee', 'firstName lastName email')
+        .populate('employee', 'firstName lastName email photo')
         .populate('createdBy', 'firstName lastName')
         .sort({ createdAt: -1 });
     }
@@ -29,7 +29,7 @@ const getTodos = async (req, res) => {
 const getTodoById = async (req, res) => {
   try {
     const todo = await Todo.findById(req.params.id)
-      .populate('employee', 'firstName lastName email')
+      .populate('employee', 'firstName lastName email photo')
       .populate('createdBy', 'firstName lastName');
 
     if (!todo) return res.status(404).json({ message: 'Todo not found' });
@@ -74,11 +74,14 @@ const createTodo = async (req, res) => {
     await todo.save();
 
     const populatedTodo = await Todo.findById(todo._id)
-      .populate('employee', 'firstName lastName email')
+      .populate('employee', 'firstName lastName email photo')
       .populate('createdBy', 'firstName lastName');
 
-    // Emit real-time notification to the employee
+    // Emit real-time update to all connected clients
     const io = req.app.get('io');
+    io.emit('todo-created', { todo: populatedTodo });
+
+    // Emit specific notification to the assigned employee
     io.emit(`todo-notification-${employee}`, {
       type: 'new_todo',
       message: `New todo assigned: ${title}`,
@@ -123,8 +126,12 @@ const updateTodo = async (req, res) => {
       new: true,
       runValidators: true
     })
-      .populate('employee', 'firstName lastName email')
+      .populate('employee', 'firstName lastName email photo')
       .populate('createdBy', 'firstName lastName');
+
+    // Emit real-time update to all connected clients
+    const io = req.app.get('io');
+    io.emit('todo-updated', { todo: updatedTodo });
 
     res.json({ message: 'Todo updated successfully', todo: updatedTodo });
   } catch (err) {
@@ -147,6 +154,11 @@ const deleteTodo = async (req, res) => {
     }
 
     await Todo.findByIdAndDelete(id);
+
+    // Emit real-time update to all connected clients
+    const io = req.app.get('io');
+    io.emit('todo-deleted', { todoId: id });
+
     res.json({ message: 'Todo deleted successfully' });
   } catch (err) {
     console.error(err);
@@ -165,7 +177,7 @@ const getTodosByEmployee = async (req, res) => {
     }
 
     const todos = await Todo.find({ employee: employeeId })
-      .populate('employee', 'firstName lastName email')
+      .populate('employee', 'firstName lastName email photo')
       .populate('createdBy', 'firstName lastName')
       .sort({ createdAt: -1 });
 

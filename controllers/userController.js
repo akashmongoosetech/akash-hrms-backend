@@ -145,7 +145,7 @@ const createUser = async (req, res) => {
       skillsFrontend, skillsBackend, bankAccountName, bankAccountNo,
       bankName, ifscCode, bankAddress, salaryDetails,
       aadharCardNumber, drivingLicenseNumber, panCardNumber,
-      facebook, twitter, linkedin, instagram, upworkProfile, role
+      facebook, twitter, linkedin, instagram, upworkProfile, role, department
     } = req.body;
 
     if (!firstName || !lastName || !email || !password) {
@@ -179,7 +179,7 @@ const createUser = async (req, res) => {
       salaryDetails: salaryDetails ? JSON.parse(salaryDetails) : {},
       aadharCardNumber, drivingLicenseNumber, panCardNumber,
       facebook, twitter, linkedin, instagram, upworkProfile,
-      role: assignedRole,
+      role: assignedRole, department,
     };
 
     if (req.files) {
