@@ -44,6 +44,11 @@ const userSchema = new mongoose.Schema({
   resume: String,
   role: { type: String, enum: ['Employee', 'Admin', 'SuperAdmin'], default: 'Employee' },
   department: { type: mongoose.Schema.Types.ObjectId, ref: 'Department' },
+  leaveBalance: {
+    vacation: { type: Number, default: 20 },
+    sick: { type: Number, default: 10 },
+    personal: { type: Number, default: 5 }
+  },
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);

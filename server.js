@@ -39,6 +39,7 @@ app.use('/api/comments', require('./routes/comments'));
 app.use('/api/breaks', require('./routes/breaks'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/links', require('./routes/links'));
+app.use('/api/leaves', require('./routes/leaves'));
 
 // example protected route
 const authenticate = require('./middleware/auth');
