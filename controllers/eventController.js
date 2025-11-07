@@ -1,5 +1,6 @@
 const Event = require('../models/Event');
 const User = require('../models/User');
+const webpush = require('web-push');
 
 const getEvents = async (req, res) => {
   try {
@@ -33,18 +34,42 @@ const createEvent = async (req, res) => {
     const event = new Event({ name, date });
     await event.save();
 
-    // Get all employees to send notifications
+    // Get all employees to send push notifications
     const employees = await User.find({ role: 'Employee' });
 
-    // Emit real-time notification to all employees
-    const io = req.app.get('io');
-    employees.forEach(employee => {
-      io.emit(`event-notification-${employee._id}`, {
-        type: 'new_event',
-        message: `New event: ${name}`,
-        event: event
-      });
+    // Send push notifications to all employees
+    const notificationPayload = {
+      title: '🎊 New Event Added',
+      body: `${name} on ${new Date(date).toLocaleDateString()}`,
+      icon: '/favicon.ico',
+      badge: '/favicon.ico',
+      url: '/events',
+      data: {
+        eventId: event._id,
+        type: 'new_event'
+      }
+    };
+
+    // Send push notifications to all subscribed employees
+    const pushPromises = employees.map(async (employee) => {
+      if (employee.pushSubscriptions && employee.pushSubscriptions.length > 0) {
+        const promises = employee.pushSubscriptions.map(subscription =>
+          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
+            .catch(error => {
+              // Remove invalid subscriptions
+              if (error.statusCode === 410) {
+                User.findByIdAndUpdate(employee._id, {
+                  $pull: { pushSubscriptions: subscription }
+                }).exec();
+              }
+            })
+        );
+        return Promise.all(promises);
+      }
     });
+
+    // Execute all push notification promises
+    await Promise.all(pushPromises);
 
     res.status(201).json({ message: 'Event created successfully', event });
   } catch (err) {
@@ -61,6 +86,43 @@ const updateEvent = async (req, res) => {
     const event = await Event.findByIdAndUpdate(id, updates, { new: true, runValidators: true });
     if (!event) return res.status(404).json({ message: 'Event not found' });
 
+    // Get all employees to send push notifications
+    const employees = await User.find({ role: 'Employee' });
+
+    // Send push notifications to all employees
+    const notificationPayload = {
+      title: '📅 Event Updated',
+      body: `${event.name} has been updated`,
+      icon: '/favicon.ico',
+      badge: '/favicon.ico',
+      url: '/events',
+      data: {
+        eventId: event._id,
+        type: 'updated_event'
+      }
+    };
+
+    // Send push notifications to all subscribed employees
+    const pushPromises = employees.map(async (employee) => {
+      if (employee.pushSubscriptions && employee.pushSubscriptions.length > 0) {
+        const promises = employee.pushSubscriptions.map(subscription =>
+          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
+            .catch(error => {
+              // Remove invalid subscriptions
+              if (error.statusCode === 410) {
+                User.findByIdAndUpdate(employee._id, {
+                  $pull: { pushSubscriptions: subscription }
+                }).exec();
+              }
+            })
+        );
+        return Promise.all(promises);
+      }
+    });
+
+    // Execute all push notification promises
+    await Promise.all(pushPromises);
+
     res.json({ message: 'Event updated successfully', event });
   } catch (err) {
     console.error(err);
@@ -74,6 +136,43 @@ const deleteEvent = async (req, res) => {
 
     const event = await Event.findByIdAndDelete(id);
     if (!event) return res.status(404).json({ message: 'Event not found' });
+
+    // Get all employees to send push notifications
+    const employees = await User.find({ role: 'Employee' });
+
+    // Send push notifications to all employees
+    const notificationPayload = {
+      title: '🚫 Event Removed',
+      body: `${event.name} has been deleted`,
+      icon: '/favicon.ico',
+      badge: '/favicon.ico',
+      url: '/events',
+      data: {
+        eventId: event._id,
+        type: 'deleted_event'
+      }
+    };
+
+    // Send push notifications to all subscribed employees
+    const pushPromises = employees.map(async (employee) => {
+      if (employee.pushSubscriptions && employee.pushSubscriptions.length > 0) {
+        const promises = employee.pushSubscriptions.map(subscription =>
+          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
+            .catch(error => {
+              // Remove invalid subscriptions
+              if (error.statusCode === 410) {
+                User.findByIdAndUpdate(employee._id, {
+                  $pull: { pushSubscriptions: subscription }
+                }).exec();
+              }
+            })
+        );
+        return Promise.all(promises);
+      }
+    });
+
+    // Execute all push notification promises
+    await Promise.all(pushPromises);
 
     res.json({ message: 'Event deleted successfully' });
   } catch (err) {

@@ -28,9 +28,9 @@ connectDB(process.env.MONGO_URI || 'mongodb://localhost:27017/hrms');
 
 // Configure web-push
 webpush.setVapidDetails(
-  'mailto:admin@hrms.com', // Replace with your email
-  process.env.VAPID_PUBLIC_KEY || 'BHWnf-U3zH5IQarMbSyy1KkDdYFOCcpydYupXT6D06jJArvG5oaeKitn27z7NdlDaOHQu2lqPg4MjYwjX2AKHR0', // Generated VAPID public key
-  process.env.VAPID_PRIVATE_KEY || 'kEzndMzhvGF7-qIjFkiNYJEO6QyEUqfK92LgSsJNUdc' // Generated VAPID private key
+  'mailto:akash.profilics@gmail.com',
+  process.env.VAPID_PUBLIC_KEY || 'BHWnf-U3zH5IQarMbSyy1KkDdYFOCcpydYupXT6D06jJArvG5oaeKitn27z7NdlDaOHQu2lqPg4MjYwjX2AKHR0',
+  process.env.VAPID_PRIVATE_KEY || 'kEzndMzhvGF7-qIjFkiNYJEO6QyEUqfK92LgSsJNUdc'
 );
 
 // routes

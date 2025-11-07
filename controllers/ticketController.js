@@ -1,4 +1,6 @@
 const Ticket = require('../models/Ticket');
+const User = require('../models/User');
+const webpush = require('web-push');
 
 const getTickets = async (req, res) => {
   try {
@@ -55,13 +57,37 @@ const createTicket = async (req, res) => {
     const ticket = new Ticket(ticketData);
     await ticket.save();
 
-    // Emit real-time notification to the employee
-    const io = req.app.get('io');
-    io.emit(`ticket-notification-${employee}`, {
-      type: 'new_ticket',
-      message: `New ticket assigned: ${title}`,
-      ticket: ticket
-    });
+    // Send push notification only to the assigned employee
+    const assignedEmployee = await User.findById(employee);
+    if (assignedEmployee && assignedEmployee.role === 'Employee') {
+      const notificationPayload = {
+        title: '🎫 New Ticket Assigned',
+        body: `You have been assigned: ${title}`,
+        icon: '/favicon.ico',
+        badge: '/favicon.ico',
+        url: '/tickets',
+        data: {
+          ticketId: ticket._id,
+          type: 'new_ticket'
+        }
+      };
+
+      // Send push notification to the assigned employee
+      if (assignedEmployee.pushSubscriptions && assignedEmployee.pushSubscriptions.length > 0) {
+        const promises = assignedEmployee.pushSubscriptions.map(subscription =>
+          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
+            .catch(error => {
+              // Remove invalid subscriptions
+              if (error.statusCode === 410) {
+                User.findByIdAndUpdate(assignedEmployee._id, {
+                  $pull: { pushSubscriptions: subscription }
+                }).exec();
+              }
+            })
+        );
+        await Promise.all(promises);
+      }
+    }
 
     res.status(201).json({ message: 'Ticket created successfully', ticket });
   } catch (err) {
@@ -143,6 +169,38 @@ const updateTicket = async (req, res) => {
       ticket: ticket
     });
 
+    // Send push notification only to the assigned employee
+    const assignedEmployee = await User.findById(ticket.employee);
+    if (assignedEmployee && assignedEmployee.role === 'Employee') {
+      const notificationPayload = {
+        title: '📈 Ticket Updated',
+        body: `Your ticket "${ticket.title}" has been updated`,
+        icon: '/favicon.ico',
+        badge: '/favicon.ico',
+        url: '/tickets',
+        data: {
+          ticketId: ticket._id,
+          type: 'updated_ticket'
+        }
+      };
+
+      // Send push notification to the assigned employee
+      if (assignedEmployee.pushSubscriptions && assignedEmployee.pushSubscriptions.length > 0) {
+        const promises = assignedEmployee.pushSubscriptions.map(subscription =>
+          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
+            .catch(error => {
+              // Remove invalid subscriptions
+              if (error.statusCode === 410) {
+                User.findByIdAndUpdate(assignedEmployee._id, {
+                  $pull: { pushSubscriptions: subscription }
+                }).exec();
+              }
+            })
+        );
+        await Promise.all(promises);
+      }
+    }
+
     res.json({ message: 'Ticket updated successfully', ticket });
   } catch (err) {
     console.error(err);
@@ -156,6 +214,38 @@ const deleteTicket = async (req, res) => {
 
     const ticket = await Ticket.findByIdAndDelete(id);
     if (!ticket) return res.status(404).json({ message: 'Ticket not found' });
+
+    // Send push notification only to the assigned employee
+    const assignedEmployee = await User.findById(ticket.employee);
+    if (assignedEmployee && assignedEmployee.role === 'Employee') {
+      const notificationPayload = {
+        title: '🗑️ Ticket Removed',
+        body: `Your ticket "${ticket.title}" has been deleted`,
+        icon: '/favicon.ico',
+        badge: '/favicon.ico',
+        url: '/tickets',
+        data: {
+          ticketId: id,
+          type: 'deleted_ticket'
+        }
+      };
+
+      // Send push notification to the assigned employee
+      if (assignedEmployee.pushSubscriptions && assignedEmployee.pushSubscriptions.length > 0) {
+        const promises = assignedEmployee.pushSubscriptions.map(subscription =>
+          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
+            .catch(error => {
+              // Remove invalid subscriptions
+              if (error.statusCode === 410) {
+                User.findByIdAndUpdate(assignedEmployee._id, {
+                  $pull: { pushSubscriptions: subscription }
+                }).exec();
+              }
+            })
+        );
+        await Promise.all(promises);
+      }
+    }
 
     res.json({ message: 'Ticket deleted successfully' });
   } catch (err) {

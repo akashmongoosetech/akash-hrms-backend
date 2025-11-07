@@ -1,5 +1,6 @@
 const Todo = require('../models/Todo');
 const User = require('../models/User');
+const webpush = require('web-push');
 
 // Get all todos with employee details
 const getTodos = async (req, res) => {
@@ -81,12 +82,37 @@ const createTodo = async (req, res) => {
     const io = req.app.get('io');
     io.emit('todo-created', { todo: populatedTodo });
 
-    // Emit specific notification to the assigned employee
-    io.emit(`todo-notification-${employee}`, {
-      type: 'new_todo',
-      message: `New todo assigned: ${title}`,
-      todo: populatedTodo
-    });
+    // Send push notification only to the assigned employee
+    const assignedEmployee = await User.findById(employee);
+    if (assignedEmployee && assignedEmployee.role === 'Employee') {
+      const notificationPayload = {
+        title: '📋 New Todo Assigned',
+        body: `You have been assigned: ${title}`,
+        icon: '/favicon.ico',
+        badge: '/favicon.ico',
+        url: '/todo',
+        data: {
+          todoId: populatedTodo._id,
+          type: 'new_todo'
+        }
+      };
+
+      // Send push notification to the assigned employee
+      if (assignedEmployee.pushSubscriptions && assignedEmployee.pushSubscriptions.length > 0) {
+        const promises = assignedEmployee.pushSubscriptions.map(subscription =>
+          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
+            .catch(error => {
+              // Remove invalid subscriptions
+              if (error.statusCode === 410) {
+                User.findByIdAndUpdate(assignedEmployee._id, {
+                  $pull: { pushSubscriptions: subscription }
+                }).exec();
+              }
+            })
+        );
+        await Promise.all(promises);
+      }
+    }
 
     res.status(201).json({ message: 'Todo created successfully', todo: populatedTodo });
   } catch (err) {
@@ -133,6 +159,38 @@ const updateTodo = async (req, res) => {
     const io = req.app.get('io');
     io.emit('todo-updated', { todo: updatedTodo });
 
+    // Send push notification only to the assigned employee
+    const assignedEmployee = await User.findById(updatedTodo.employee);
+    if (assignedEmployee && assignedEmployee.role === 'Employee') {
+      const notificationPayload = {
+        title: '🔄 Todo Updated',
+        body: `Your todo "${updatedTodo.title}" has been updated`,
+        icon: '/favicon.ico',
+        badge: '/favicon.ico',
+        url: '/todo',
+        data: {
+          todoId: updatedTodo._id,
+          type: 'updated_todo'
+        }
+      };
+
+      // Send push notification to the assigned employee
+      if (assignedEmployee.pushSubscriptions && assignedEmployee.pushSubscriptions.length > 0) {
+        const promises = assignedEmployee.pushSubscriptions.map(subscription =>
+          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
+            .catch(error => {
+              // Remove invalid subscriptions
+              if (error.statusCode === 410) {
+                User.findByIdAndUpdate(assignedEmployee._id, {
+                  $pull: { pushSubscriptions: subscription }
+                }).exec();
+              }
+            })
+        );
+        await Promise.all(promises);
+      }
+    }
+
     res.json({ message: 'Todo updated successfully', todo: updatedTodo });
   } catch (err) {
     console.error(err);
@@ -158,6 +216,38 @@ const deleteTodo = async (req, res) => {
     // Emit real-time update to all connected clients
     const io = req.app.get('io');
     io.emit('todo-deleted', { todoId: id });
+
+    // Send push notification only to the assigned employee
+    const assignedEmployee = await User.findById(todo.employee);
+    if (assignedEmployee && assignedEmployee.role === 'Employee') {
+      const notificationPayload = {
+        title: '🗑️ Todo Removed',
+        body: `Your todo "${todo.title}" has been deleted`,
+        icon: '/favicon.ico',
+        badge: '/favicon.ico',
+        url: '/todo',
+        data: {
+          todoId: id,
+          type: 'deleted_todo'
+        }
+      };
+
+      // Send push notification to the assigned employee
+      if (assignedEmployee.pushSubscriptions && assignedEmployee.pushSubscriptions.length > 0) {
+        const promises = assignedEmployee.pushSubscriptions.map(subscription =>
+          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
+            .catch(error => {
+              // Remove invalid subscriptions
+              if (error.statusCode === 410) {
+                User.findByIdAndUpdate(assignedEmployee._id, {
+                  $pull: { pushSubscriptions: subscription }
+                }).exec();
+              }
+            })
+        );
+        await Promise.all(promises);
+      }
+    }
 
     res.json({ message: 'Todo deleted successfully' });
   } catch (err) {

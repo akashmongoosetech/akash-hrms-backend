@@ -1,5 +1,6 @@
 const Leave = require('../models/Leave');
 const User = require('../models/User');
+const webpush = require('web-push');
 
 const requestLeave = async (req, res) => {
   try {
@@ -32,27 +33,42 @@ const requestLeave = async (req, res) => {
 
     await leave.save();
 
-    // Send notification to admins and super admins
-    const io = req.app.get('io');
-    const User = require('../models/User');
-
+    // Send push notifications to admins and super admins
     const admins = await User.find({ role: { $in: ['Admin', 'SuperAdmin'] } });
-    admins.forEach(admin => {
-      io.emit(`leave-notification-${admin._id}`, {
-        message: `New leave request from ${req.user.firstName} ${req.user.lastName} (${leaveType})`,
-        type: 'leave_request',
-        leaveId: leave._id,
-        employeeId: req.user._id,
-        employeeName: `${req.user.firstName} ${req.user.lastName}`,
-        leaveType,
-        startDate,
-        endDate,
-        reason,
-        createdAt: new Date()
-      });
+
+    // Send push notifications to all subscribed admins
+    const pushPromises = admins.map(async (admin) => {
+      if (admin.pushSubscriptions && admin.pushSubscriptions.length > 0) {
+        const promises = admin.pushSubscriptions.map(subscription =>
+          webpush.sendNotification(subscription, JSON.stringify({
+            title: '📝 New Leave Request',
+            body: `${req.user.firstName} ${req.user.lastName} requested ${leaveType} leave`,
+            icon: '/favicon.ico',
+            badge: '/favicon.ico',
+            url: '/leave',
+            data: {
+              leaveId: leave._id,
+              type: 'leave_request'
+            }
+          }))
+            .catch(error => {
+              // Remove invalid subscriptions
+              if (error.statusCode === 410) {
+                User.findByIdAndUpdate(admin._id, {
+                  $pull: { pushSubscriptions: subscription }
+                }).exec();
+              }
+            })
+        );
+        return Promise.all(promises);
+      }
     });
 
+    // Execute all push notification promises
+    await Promise.all(pushPromises);
+
     // Emit to all connected clients for live updates
+    const io = req.app.get('io');
     io.emit('leave-created', leave);
 
     res.status(201).json({ message: 'Leave request submitted successfully', leave });
@@ -131,21 +147,38 @@ const updateLeaveStatus = async (req, res) => {
       .populate('approvedBy', 'firstName lastName')
       .populate('rejectedBy', 'firstName lastName');
 
-    // Send notification to employee if status changed
+    // Send push notification to employee if status changed
     if (oldStatus !== status) {
-      const io = req.app.get('io');
-      io.emit(`leave-status-notification-${leave.employee._id}`, {
-        message: `Your leave request (${leave.leaveType}) has been ${status.toLowerCase()}`,
-        type: 'leave_status_update',
-        leaveId: leave._id,
-        status,
-        leaveType: leave.leaveType,
-        startDate: leave.startDate,
-        endDate: leave.endDate,
-        updatedBy: `${req.user.firstName} ${req.user.lastName}`,
-        comments,
-        createdAt: new Date()
-      });
+      const employee = await User.findById(leave.employee);
+      if (employee && employee.role === 'Employee') {
+        const notificationPayload = {
+          title: status === 'Approved' ? '✅ Leave Approved' : status === 'Rejected' ? '❌ Leave Rejected' : '⏳ Leave Status Updated',
+          body: `Your ${leave.leaveType} leave request has been ${status.toLowerCase()}`,
+          icon: '/favicon.ico',
+          badge: '/favicon.ico',
+          url: '/leave',
+          data: {
+            leaveId: leave._id,
+            type: 'leave_status_update'
+          }
+        };
+
+        // Send push notification to the employee
+        if (employee.pushSubscriptions && employee.pushSubscriptions.length > 0) {
+          const promises = employee.pushSubscriptions.map(subscription =>
+            webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
+              .catch(error => {
+                // Remove invalid subscriptions
+                if (error.statusCode === 410) {
+                  User.findByIdAndUpdate(employee._id, {
+                    $pull: { pushSubscriptions: subscription }
+                  }).exec();
+                }
+              })
+          );
+          await Promise.all(promises);
+        }
+      }
     }
 
     // Emit to all connected clients for live updates
