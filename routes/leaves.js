@@ -10,8 +10,11 @@ router.post('/', authenticate, authorizeRoles('Employee'), leaveController.reque
 // Get leaves - Employee and above (employees see their own, admins see all)
 router.get('/', authenticate, authorizeRoles('Employee'), leaveController.getLeaves);
 
-// Update leave status (Approve/Reject) - Admin and SuperAdmin only
+// Update leave status (Approve/Reject/Pending) - Admin and SuperAdmin only
 router.put('/:id/status', authenticate, authorizeRoles('Admin'), leaveController.updateLeaveStatus);
+
+// Update leave details - Admin and SuperAdmin only
+router.put('/:id', authenticate, authorizeRoles('Admin'), leaveController.updateLeave);
 
 // Delete leave - SuperAdmin only
 router.delete('/:id', authenticate, authorizeRoles('SuperAdmin'), leaveController.deleteLeave);

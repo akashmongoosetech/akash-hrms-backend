@@ -7,7 +7,7 @@ const requestLeave = async (req, res) => {
     const employee = req.user._id;
 
     // Validate leaveType
-    if (!['Vacation', 'Sick', 'Personal'].includes(leaveType)) {
+    if (!['Casual', 'Sick', 'Earned', 'Vacation', 'Personal'].includes(leaveType)) {
       return res.status(400).json({ message: 'Invalid leave type' });
     }
 
@@ -31,6 +31,30 @@ const requestLeave = async (req, res) => {
     });
 
     await leave.save();
+
+    // Send notification to admins and super admins
+    const io = req.app.get('io');
+    const User = require('../models/User');
+
+    const admins = await User.find({ role: { $in: ['Admin', 'SuperAdmin'] } });
+    admins.forEach(admin => {
+      io.emit(`leave-notification-${admin._id}`, {
+        message: `New leave request from ${req.user.firstName} ${req.user.lastName} (${leaveType})`,
+        type: 'leave_request',
+        leaveId: leave._id,
+        employeeId: req.user._id,
+        employeeName: `${req.user.firstName} ${req.user.lastName}`,
+        leaveType,
+        startDate,
+        endDate,
+        reason,
+        createdAt: new Date()
+      });
+    });
+
+    // Emit to all connected clients for live updates
+    io.emit('leave-created', leave);
+
     res.status(201).json({ message: 'Leave request submitted successfully', leave });
   } catch (err) {
     console.error(err);
@@ -78,23 +102,105 @@ const updateLeaveStatus = async (req, res) => {
     const { id } = req.params;
     const { status, comments } = req.body;
 
-    if (!['Approved', 'Rejected'].includes(status)) {
+    if (!['Pending', 'Approved', 'Rejected'].includes(status)) {
       return res.status(400).json({ message: 'Invalid status' });
     }
 
-    const leave = await Leave.findById(id);
+    const leave = await Leave.findById(id).populate('employee', 'firstName lastName email');
     if (!leave) return res.status(404).json({ message: 'Leave not found' });
 
+    const oldStatus = leave.status;
     leave.status = status;
     if (status === 'Approved') {
       leave.approvedBy = req.user._id;
+      leave.rejectedBy = undefined;
     } else if (status === 'Rejected') {
       leave.rejectedBy = req.user._id;
+      leave.approvedBy = undefined;
+    } else if (status === 'Pending') {
+      leave.approvedBy = undefined;
+      leave.rejectedBy = undefined;
     }
     if (comments) leave.comments = comments;
 
     await leave.save();
-    res.json({ message: 'Leave status updated successfully', leave });
+
+    // Populate the leave with updated data for socket emission
+    const updatedLeave = await Leave.findById(id)
+      .populate('employee', 'firstName lastName email')
+      .populate('approvedBy', 'firstName lastName')
+      .populate('rejectedBy', 'firstName lastName');
+
+    // Send notification to employee if status changed
+    if (oldStatus !== status) {
+      const io = req.app.get('io');
+      io.emit(`leave-status-notification-${leave.employee._id}`, {
+        message: `Your leave request (${leave.leaveType}) has been ${status.toLowerCase()}`,
+        type: 'leave_status_update',
+        leaveId: leave._id,
+        status,
+        leaveType: leave.leaveType,
+        startDate: leave.startDate,
+        endDate: leave.endDate,
+        updatedBy: `${req.user.firstName} ${req.user.lastName}`,
+        comments,
+        createdAt: new Date()
+      });
+    }
+
+    // Emit to all connected clients for live updates
+    const io = req.app.get('io');
+    io.emit('leave-updated', updatedLeave);
+
+    res.json({ message: 'Leave status updated successfully', leave: updatedLeave });
+  } catch (err) {
+    console.error('Error in updateLeaveStatus:', err);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+};
+
+const updateLeave = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { startDate, endDate, leaveType, reason } = req.body;
+
+    // Validate leaveType
+    if (!['Casual', 'Sick', 'Earned', 'Vacation', 'Personal'].includes(leaveType)) {
+      return res.status(400).json({ message: 'Invalid leave type' });
+    }
+
+    // Validate dates
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    if (end < start) {
+      return res.status(400).json({ message: 'End date must be after or equal to start date' });
+    }
+
+    // Calculate days requested (inclusive)
+    const daysRequested = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1;
+
+    const leave = await Leave.findById(id);
+    if (!leave) return res.status(404).json({ message: 'Leave not found' });
+
+    leave.startDate = startDate;
+    leave.endDate = endDate;
+    leave.leaveType = leaveType;
+    leave.reason = reason;
+    leave.daysRequested = daysRequested;
+
+    await leave.save();
+
+    // Populate the leave with updated data for socket emission
+    const updatedLeave = await Leave.findById(id)
+      .populate('employee', 'firstName lastName email')
+      .populate('approvedBy', 'firstName lastName')
+      .populate('rejectedBy', 'firstName lastName');
+
+    // Emit to all connected clients for live updates
+    const io = req.app.get('io');
+    io.emit('leave-updated', updatedLeave);
+
+    res.json({ message: 'Leave updated successfully', leave: updatedLeave });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
@@ -106,6 +212,11 @@ const deleteLeave = async (req, res) => {
     const { id } = req.params;
     const leave = await Leave.findByIdAndDelete(id);
     if (!leave) return res.status(404).json({ message: 'Leave not found' });
+
+    // Emit to all connected clients for live updates
+    const io = req.app.get('io');
+    io.emit('leave-deleted', id);
+
     res.json({ message: 'Leave deleted successfully' });
   } catch (err) {
     console.error(err);
@@ -113,4 +224,4 @@ const deleteLeave = async (req, res) => {
   }
 };
 
-module.exports = { requestLeave, getLeaves, updateLeaveStatus, deleteLeave };
+module.exports = { requestLeave, getLeaves, updateLeaveStatus, updateLeave, deleteLeave };
