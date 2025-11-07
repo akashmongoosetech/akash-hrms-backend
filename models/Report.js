@@ -9,6 +9,7 @@ const reportSchema = new mongoose.Schema({
   workingHours: { type: String, required: true }, // HH:MM format
   totalHours: { type: String, required: true }, // HH:MM format
   date: { type: String, required: true }, // YYYY-MM-DD
+  note: { type: String, default: '' }, // Note field for admin/super admin
 }, { timestamps: true });
 
 module.exports = mongoose.model('Report', reportSchema);

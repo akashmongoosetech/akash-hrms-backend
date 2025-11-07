@@ -107,6 +107,16 @@ const updateReport = async (req, res) => {
     const updatedReport = await Report.findByIdAndUpdate(id, updates, { new: true })
       .populate('employee', 'firstName lastName email photo');
 
+    // Emit socket event for real-time updates
+    const io = req.app.get('io');
+    io.emit('reportUpdated', {
+      updatedReport,
+      updater: {
+        name: `${req.user.firstName} ${req.user.lastName}`,
+        role: req.user.role
+      }
+    });
+
     res.json({ message: 'Report updated successfully', report: updatedReport });
   } catch (err) {
     console.error(err);
