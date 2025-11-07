@@ -37,6 +37,16 @@ const createEvent = async (req, res) => {
     // Get all employees to send push notifications
     const employees = await User.find({ role: 'Employee' });
 
+    // Emit real-time notification to all employees
+    const io = req.app.get('io');
+    employees.forEach(employee => {
+      io.emit(`event-notification-${employee._id}`, {
+        type: 'new_event',
+        message: `New event: ${name}`,
+        event: event
+      });
+     });
+
     // Send push notifications to all employees
     const notificationPayload = {
       title: '🎊 New Event Added',
@@ -89,6 +99,15 @@ const updateEvent = async (req, res) => {
     // Get all employees to send push notifications
     const employees = await User.find({ role: 'Employee' });
 
+    const io = req.app.get('io');
+    employees.forEach(employee => {
+      io.emit(`event-notification-${employee._id}`, {
+        type: 'updated_event',
+        message: `Event Updated: ${event.name}`,
+        event: event
+      });
+     });
+
     // Send push notifications to all employees
     const notificationPayload = {
       title: '📅 Event Updated',
@@ -140,6 +159,16 @@ const deleteEvent = async (req, res) => {
     // Get all employees to send push notifications
     const employees = await User.find({ role: 'Employee' });
 
+    const io = req.app.get('io');
+    employees.forEach(employee => {
+      io.emit(`event-notification-${employee._id}`, {
+        type: 'deleted_event',
+        message: `Event Deleted: ${event.name}`,
+        event: event
+      });
+     });
+
+
     // Send push notifications to all employees
     const notificationPayload = {
       title: '🚫 Event Removed',
@@ -177,7 +206,7 @@ const deleteEvent = async (req, res) => {
     res.json({ message: 'Event deleted successfully' });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
 };
 

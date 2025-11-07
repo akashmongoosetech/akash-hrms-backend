@@ -33,8 +33,27 @@ const requestLeave = async (req, res) => {
 
     await leave.save();
 
+     // Send notification to admins and super admins
+    const io = req.app.get('io');
+    const User = require('../models/User');
+
     // Send push notifications to admins and super admins
     const admins = await User.find({ role: { $in: ['Admin', 'SuperAdmin'] } });
+
+    admins.forEach(admin => {
+      io.emit(`leave-notification-${admin._id}`, {
+        message: `New leave request from ${req.user.firstName} ${req.user.lastName} (${leaveType})`,
+        type: 'leave_request',
+        leaveId: leave._id,
+        employeeId: req.user._id,
+        employeeName: `${req.user.firstName} ${req.user.lastName}`,
+        leaveType,
+        startDate,
+        endDate,
+        reason,
+        createdAt: new Date()
+      });
+    });
 
     // Send push notifications to all subscribed admins
     const pushPromises = admins.map(async (admin) => {
@@ -67,11 +86,13 @@ const requestLeave = async (req, res) => {
     // Execute all push notification promises
     await Promise.all(pushPromises);
 
-    // Emit to all connected clients for live updates
-    const io = req.app.get('io');
-    io.emit('leave-created', leave);
+    // Populate the leave with employee data for socket emission
+    const populatedLeave = await Leave.findById(leave._id).populate('employee', 'firstName lastName email');
 
-    res.status(201).json({ message: 'Leave request submitted successfully', leave });
+    // Emit to all connected clients for live updates
+    io.emit('leave-created', populatedLeave);
+
+    res.status(201).json({ message: 'Leave request submitted successfully', leave: populatedLeave });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
@@ -149,6 +170,21 @@ const updateLeaveStatus = async (req, res) => {
 
     // Send push notification to employee if status changed
     if (oldStatus !== status) {
+      const io = req.app.get('io');
+      io.emit(`leave-status-notification-${leave.employee._id}`, {
+        message: `Your leave request (${leave.leaveType}) has been ${status.toLowerCase()}`,
+        type: 'leave_status_update',
+        leaveId: leave._id,
+        status,
+        leaveType: leave.leaveType,
+        startDate: leave.startDate,
+        endDate: leave.endDate,
+        updatedBy: `${req.user.firstName} ${req.user.lastName}`,
+        comments,
+        createdAt: new Date()
+      });
+
+      
       const employee = await User.findById(leave.employee);
       if (employee && employee.role === 'Employee') {
         const notificationPayload = {

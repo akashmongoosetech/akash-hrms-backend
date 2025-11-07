@@ -57,6 +57,14 @@ const createTicket = async (req, res) => {
     const ticket = new Ticket(ticketData);
     await ticket.save();
 
+    // Emit real-time notification to the employee
+    const io = req.app.get('io');
+    io.emit(`ticket-notification-${employee}`, {
+      type: 'new_ticket',
+      message: `New ticket assigned: ${title}`,
+      ticket: ticket
+    });
+
     // Send push notification only to the assigned employee
     const assignedEmployee = await User.findById(employee);
     if (assignedEmployee && assignedEmployee.role === 'Employee') {

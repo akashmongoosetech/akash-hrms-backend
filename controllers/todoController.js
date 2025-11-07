@@ -82,6 +82,13 @@ const createTodo = async (req, res) => {
     const io = req.app.get('io');
     io.emit('todo-created', { todo: populatedTodo });
 
+     // Emit specific notification to the assigned employee
+    io.emit(`todo-notification-${employee}`, {
+      type: 'new_todo',
+      message: `New todo assigned: ${title}`,
+      todo: populatedTodo
+    });
+
     // Send push notification only to the assigned employee
     const assignedEmployee = await User.findById(employee);
     if (assignedEmployee && assignedEmployee.role === 'Employee') {

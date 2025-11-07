@@ -45,6 +45,15 @@ const createHoliday = async (req, res) => {
     // Get all employees to send push notifications
     const employees = await User.find({ role: 'Employee' });
 
+    const io = req.app.get('io');
+    employees.forEach(employee => {
+      io.emit(`holiday-notification-${employee._id}`, {
+        type: 'new_holiday',
+        message: `New holiday: ${name}`,
+        holiday: holiday
+      });
+    });
+
     // Send push notifications to all employees
     const notificationPayload = {
       title: '🎉 New Holiday Added',
@@ -96,7 +105,16 @@ const updateHoliday = async (req, res) => {
 
     // Get all employees to send push notifications
     const employees = await User.find({ role: 'Employee' });
-
+    
+    const io = req.app.get('io');
+    employees.forEach(employee => {
+      io.emit(`holiday-notification-${employee._id}`, {
+        type: 'updated_holiday',
+        message: `Holiday updated: ${holiday.name}`,
+        holiday: holiday
+      });
+    });
+    
     // Send push notifications to all employees
     const notificationPayload = {
       title: '🗓️ Holiday Updated',
@@ -148,6 +166,15 @@ const deleteHoliday = async (req, res) => {
 
     // Get all employees to send push notifications
     const employees = await User.find({ role: 'Employee' });
+
+    const io = req.app.get('io');
+    employees.forEach(employee => {
+      io.emit(`holiday-notification-${employee._id}`, {
+        type: 'deleted_holiday',
+        message: `Holiday deleted: ${holiday.name}`,
+        holiday: holiday
+      });
+    });
 
     // Send push notifications to all employees
     const notificationPayload = {
