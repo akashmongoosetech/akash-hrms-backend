@@ -49,6 +49,13 @@ const userSchema = new mongoose.Schema({
     sick: { type: Number, default: 10 },
     personal: { type: Number, default: 5 }
   },
+  pushSubscriptions: [{
+    endpoint: { type: String, required: true },
+    keys: {
+      p256dh: { type: String, required: true },
+      auth: { type: String, required: true }
+    }
+  }],
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);

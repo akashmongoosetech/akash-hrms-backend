@@ -28,4 +28,8 @@ router.put('/:id', authenticate, authorizeRoles('Employee'), cpUpload, userContr
 // Delete user - SuperAdmin only
 router.delete('/:id', authenticate, authorizeRoles('SuperAdmin'), userController.deleteUser);
 
+// Push notification subscription routes
+router.post('/subscribe-push', authenticate, userController.subscribePush);
+router.post('/unsubscribe-push', authenticate, userController.unsubscribePush);
+
 module.exports = router;

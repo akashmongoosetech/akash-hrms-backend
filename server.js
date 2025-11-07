@@ -4,6 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const http = require('http');
 const socketIo = require('socket.io');
+const webpush = require('web-push');
 const connectDB = require('./config/db');
 
 const app = express();
@@ -24,6 +25,13 @@ app.use('/api/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // connect DB
 connectDB(process.env.MONGO_URI || 'mongodb://localhost:27017/hrms');
+
+// Configure web-push
+webpush.setVapidDetails(
+  'mailto:admin@hrms.com', // Replace with your email
+  process.env.VAPID_PUBLIC_KEY || 'BHWnf-U3zH5IQarMbSyy1KkDdYFOCcpydYupXT6D06jJArvG5oaeKitn27z7NdlDaOHQu2lqPg4MjYwjX2AKHR0', // Generated VAPID public key
+  process.env.VAPID_PRIVATE_KEY || 'kEzndMzhvGF7-qIjFkiNYJEO6QyEUqfK92LgSsJNUdc' // Generated VAPID private key
+);
 
 // routes
 app.use('/api/auth', require('./routes/auth'));

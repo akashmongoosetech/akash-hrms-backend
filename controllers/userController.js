@@ -1,5 +1,6 @@
 const bcrypt = require('bcryptjs');
 const User = require('../models/User');
+const webpush = require('web-push');
 
 const getUsers = async (req, res) => {
   try {
@@ -200,4 +201,44 @@ const createUser = async (req, res) => {
   }
 };
 
-module.exports = { getUsers, getUserById, updateUser, deleteUser, createUser };
+const subscribePush = async (req, res) => {
+  try {
+    const { subscription } = req.body;
+    const userId = req.user._id;
+
+    // Find user and add subscription
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    // Check if subscription already exists
+    const existingSubscription = user.pushSubscriptions.find(
+      sub => sub.endpoint === subscription.endpoint
+    );
+
+    if (!existingSubscription) {
+      user.pushSubscriptions.push(subscription);
+      await user.save();
+    }
+
+    res.json({ message: 'Subscription added successfully' });
+  } catch (error) {
+    console.error('Error subscribing to push notifications:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+const unsubscribePush = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    // Remove all subscriptions for this user
+    await User.findByIdAndUpdate(userId, { pushSubscriptions: [] });
+
+    res.json({ message: 'Unsubscribed successfully' });
+  } catch (error) {
+    console.error('Error unsubscribing from push notifications:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+module.exports = { getUsers, getUserById, updateUser, deleteUser, createUser, subscribePush, unsubscribePush };
