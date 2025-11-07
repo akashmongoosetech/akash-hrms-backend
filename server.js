@@ -40,6 +40,7 @@ app.use('/api/breaks', require('./routes/breaks'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/links', require('./routes/links'));
 app.use('/api/leaves', require('./routes/leaves'));
+app.use('/api/punches', require('./routes/punches'));
 
 // example protected route
 const authenticate = require('./middleware/auth');

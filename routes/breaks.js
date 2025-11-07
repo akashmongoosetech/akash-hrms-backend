@@ -19,4 +19,7 @@ router.get('/employees', authenticate, authorizeRoles('Admin', 'SuperAdmin'), br
 // Get break duration for today - Employee and above
 router.get('/duration', authenticate, authorizeRoles('Employee'), breakController.getBreakDuration);
 
+// Get break status for current user - Employee and above
+router.get('/status', authenticate, authorizeRoles('Employee'), breakController.getBreakStatus);
+
 module.exports = router;

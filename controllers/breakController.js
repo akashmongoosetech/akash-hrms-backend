@@ -8,6 +8,22 @@ const createBreak = async (req, res) => {
     const now = new Date();
     const date = now.toISOString().split('T')[0]; // YYYY-MM-DD
 
+    // Validation for Break In: check if already on break
+    if (action === 'Break In') {
+      const lastBreak = await Break.findOne({ employee, date }).sort({ timestamp: -1 });
+      if (lastBreak && lastBreak.action === 'Break In') {
+        return res.status(400).json({ message: 'You are already on break' });
+      }
+    }
+
+    // Validation for Break Out: check if on break
+    if (action === 'Break Out') {
+      const lastBreak = await Break.findOne({ employee, date }).sort({ timestamp: -1 });
+      if (!lastBreak || lastBreak.action === 'Break Out') {
+        return res.status(400).json({ message: 'You are not on break' });
+      }
+    }
+
     const newBreak = new Break({
       employee,
       action,
@@ -143,4 +159,25 @@ const getBreakDuration = async (req, res) => {
   }
 };
 
-module.exports = { createBreak, createBreakByAdmin, getBreaks, getEmployees, getBreakDuration };
+const getBreakStatus = async (req, res) => {
+  try {
+    const employeeId = req.user._id;
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+
+    // Get the last break record for today
+    const lastBreak = await Break.findOne({
+      employee: employeeId,
+      date: today
+    }).sort({ timestamp: -1 });
+
+    // If no breaks today or last action was Break Out, not on break
+    const isOnBreak = lastBreak && lastBreak.action === 'Break In';
+
+    res.json({ isOnBreak });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+module.exports = { createBreak, createBreakByAdmin, getBreaks, getEmployees, getBreakDuration, getBreakStatus };
