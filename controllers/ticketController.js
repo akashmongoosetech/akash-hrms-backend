@@ -15,7 +15,7 @@ const getTickets = async (req, res) => {
     }
 
     const tickets = await Ticket.find(query)
-      .populate('employee', 'firstName lastName email')
+      .populate('employee', 'firstName lastName email photo')
       .sort({ createdAt: -1 });
     res.json(tickets);
   } catch (err) {
@@ -166,7 +166,7 @@ const updateTicket = async (req, res) => {
 
     await ticket.save();
     await ticket.populate([
-      { path: 'employee', select: 'firstName lastName email' },
+      { path: 'employee', select: 'firstName lastName email photo' },
       { path: 'progress.updatedBy', select: 'firstName lastName role' }
     ]);
 
