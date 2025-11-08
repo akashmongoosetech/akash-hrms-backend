@@ -16,6 +16,7 @@ const userSchema = new mongoose.Schema({
   joiningDate: Date,
   mobile1: String,
   mobile2: String,
+  salary: Number,
   password: { type: String, required: true },
   address1: String,
   address2: String,

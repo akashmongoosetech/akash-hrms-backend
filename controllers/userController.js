@@ -58,7 +58,7 @@ const updateUser = async (req, res) => {
         'address1', 'address2', 'emergencyContact1', 'emergencyContact2', 'emergencyContact3',
         'skillsFrontend', 'skillsBackend', 'bankAccountName', 'bankAccountNo', 'bankName',
         'ifscCode', 'bankAddress', 'aadharCardNumber', 'drivingLicenseNumber', 'panCardNumber',
-        'facebook', 'twitter', 'linkedin', 'instagram', 'upworkProfile'
+        'facebook', 'twitter', 'linkedin', 'instagram', 'upworkProfile', 'salary'
       ];
 
       // Filter updates to only allowed fields
@@ -144,7 +144,7 @@ const createUser = async (req, res) => {
       mobile1, mobile2, password, address1, address2,
       emergencyContact1, emergencyContact2, emergencyContact3,
       skillsFrontend, skillsBackend, bankAccountName, bankAccountNo,
-      bankName, ifscCode, bankAddress, salaryDetails,
+      bankName, ifscCode, bankAddress, salaryDetails, salary,
       aadharCardNumber, drivingLicenseNumber, panCardNumber,
       facebook, twitter, linkedin, instagram, upworkProfile, role, department
     } = req.body;
@@ -178,6 +178,7 @@ const createUser = async (req, res) => {
       skillsBackend: skillsBackend ? JSON.parse(skillsBackend) : [],
       bankAccountName, bankAccountNo, bankName, ifscCode, bankAddress,
       salaryDetails: salaryDetails ? JSON.parse(salaryDetails) : {},
+      salary: salary ? parseFloat(salary) : undefined,
       aadharCardNumber, drivingLicenseNumber, panCardNumber,
       facebook, twitter, linkedin, instagram, upworkProfile,
       role: assignedRole, department,
