@@ -146,7 +146,7 @@ const createUser = async (req, res) => {
       skillsFrontend, skillsBackend, bankAccountName, bankAccountNo,
       bankName, ifscCode, bankAddress, salaryDetails, salary,
       aadharCardNumber, drivingLicenseNumber, panCardNumber,
-      facebook, twitter, linkedin, instagram, upworkProfile, role, department
+      facebook, twitter, linkedin, instagram, upworkProfile, role, department, status
     } = req.body;
 
     if (!firstName || !lastName || !email || !password) {
@@ -181,7 +181,7 @@ const createUser = async (req, res) => {
       salary: salary ? parseFloat(salary) : undefined,
       aadharCardNumber, drivingLicenseNumber, panCardNumber,
       facebook, twitter, linkedin, instagram, upworkProfile,
-      role: assignedRole, department,
+      role: assignedRole, status: status || 'Active', department,
     };
 
     if (req.files) {
