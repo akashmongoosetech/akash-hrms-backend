@@ -103,8 +103,24 @@ const getBreaks = async (req, res) => {
     let query = {};
     if (req.user.role === 'Employee') {
       query.employee = req.user._id;
+    } else {
+      // Admin and SuperAdmin can filter by employeeId if provided
+      if (req.query.employeeId) {
+        query.employee = req.query.employeeId;
+      }
     }
-    // For Admin and SuperAdmin, query remains empty, so all breaks
+
+    // Date filtering
+    if (req.query.fromDate || req.query.toDate) {
+      query.date = {};
+      if (req.query.fromDate) {
+        query.date.$gte = req.query.fromDate;
+      }
+      if (req.query.toDate) {
+        query.date.$lte = req.query.toDate;
+      }
+    }
+
     const breaks = await Break.find(query).populate('employee', 'firstName lastName photo').populate('addedBy', 'role firstName lastName').sort({ timestamp: -1 });
     res.json(breaks);
   } catch (err) {

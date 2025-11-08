@@ -84,6 +84,19 @@ const getPunchTimes = async (req, res) => {
       query.employee = req.user._id;
     }
 
+    // Add filters for employee, fromDate, toDate
+    if (req.query.employee && req.user.role !== 'Employee') {
+      query.employee = req.query.employee;
+    }
+    if (req.query.fromDate) {
+      query.createdAt = { ...query.createdAt, $gte: new Date(req.query.fromDate) };
+    }
+    if (req.query.toDate) {
+      const toDate = new Date(req.query.toDate);
+      toDate.setHours(23, 59, 59, 999); // End of day
+      query.createdAt = { ...query.createdAt, $lte: toDate };
+    }
+
     const totalPunchTimes = await PunchTime.countDocuments(query);
     const punchTimes = await PunchTime.find(query)
       .populate('employee', 'firstName lastName email')
