@@ -49,6 +49,7 @@ app.use('/api/reports', require('./routes/reports'));
 app.use('/api/links', require('./routes/links'));
 app.use('/api/leaves', require('./routes/leaves'));
 app.use('/api/punches', require('./routes/punches'));
+app.use('/api/alternate-saturdays', require('./routes/alternateSaturdays'));
 
 // example protected route
 const authenticate = require('./middleware/auth');
