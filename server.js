@@ -38,9 +38,11 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/departments', require('./routes/departments'));
 app.use('/api/holidays', require('./routes/holidays'));
+app.use('/api/saturdays', require('./routes/saturdays'));
 app.use('/api/events', require('./routes/events'));
 app.use('/api/clients', require('./routes/clients'));
 app.use('/api/projects', require('./routes/projects'));
+app.use('/api/teams', require('./routes/teams'));
 app.use('/api/todos', require('./routes/todos'));
 app.use('/api/tickets', require('./routes/tickets'));
 app.use('/api/comments', require('./routes/comments'));
@@ -49,6 +51,7 @@ app.use('/api/reports', require('./routes/reports'));
 app.use('/api/links', require('./routes/links'));
 app.use('/api/leaves', require('./routes/leaves'));
 app.use('/api/punches', require('./routes/punches'));
+app.use('/api/candidates', require('./routes/candidates'));
 
 // example protected route
 const authenticate = require('./middleware/auth');
