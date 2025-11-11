@@ -7,9 +7,35 @@ const createReport = async (req, res) => {
     const employee = req.user._id;
     const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
 
+    // Check if report already exists for today
+    const existingReport = await Report.findOne({ employee, date });
+    if (existingReport) {
+      return res.status(400).json({ message: 'Report already submitted for today' });
+    }
+
+    // Strip HTML tags and trim description
+    const cleanDescription = description.replace(/<[^>]*>/g, '').trim();
+    if (!cleanDescription) {
+      return res.status(400).json({ message: 'Description is required' });
+    }
+
+    // Validate required fields
+    if (!startTime) {
+      return res.status(400).json({ message: 'Start time is required' });
+    }
+    if (!endTime) {
+      return res.status(400).json({ message: 'End time is required' });
+    }
+    if (!workingHours) {
+      return res.status(400).json({ message: 'Working hours is required' });
+    }
+    if (!totalHours) {
+      return res.status(400).json({ message: 'Total hours is required' });
+    }
+
     const newReport = new Report({
       employee,
-      description,
+      description: cleanDescription,
       startTime,
       breakDuration: breakDuration || 0,
       endTime,
@@ -29,7 +55,10 @@ const createReport = async (req, res) => {
 
     res.status(201).json({ message: 'Report created successfully', report: populatedReport });
   } catch (err) {
-    console.error(err);
+    console.error('Error creating report:', err);
+    if (err.name === 'ValidationError') {
+      return res.status(400).json({ message: 'Validation error', errors: err.errors });
+    }
     res.status(500).json({ message: 'Server error' });
   }
 };
