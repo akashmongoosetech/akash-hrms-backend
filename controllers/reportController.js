@@ -71,6 +71,19 @@ const getReports = async (req, res) => {
     }
     // For Admin and SuperAdmin, query remains empty, so all reports
 
+    // Add date filtering
+    if (req.query.fromDate) {
+      query.date = { ...query.date, $gte: req.query.fromDate };
+    }
+    if (req.query.toDate) {
+      query.date = { ...query.date, $lte: req.query.toDate };
+    }
+
+    // Add employee filtering for Admin/SuperAdmin
+    if (req.query.employeeId && (req.user.role === 'Admin' || req.user.role === 'SuperAdmin')) {
+      query.employee = req.query.employeeId;
+    }
+
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
