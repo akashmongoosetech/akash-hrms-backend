@@ -1,6 +1,115 @@
 const bcrypt = require('bcryptjs');
+const nodemailer = require('nodemailer');
 const User = require('../models/User');
 const webpush = require('web-push');
+
+// Create transporter for email
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  },
+  secure: true, // Use SSL
+  port: 465 // Gmail SSL port
+});
+
+// Send welcome email to new employee
+const sendWelcomeEmail = async (user) => {
+  try {
+    const loginUrl = `${process.env.FRONTEND_URL}/login`;
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: user.email,
+      subject: `🎉 Welcome to SoSapient Inc. | Your Onboarding Details`,
+      html: `
+        <div style="font-family: 'Segoe UI', Arial, sans-serif; background-color: #f5f7fa; padding: 40px 0;">
+          <div style="max-width: 650px; margin: auto; background: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 20px rgba(0,0,0,0.08);">
+
+            <!-- Header Section -->
+            <div style="background: linear-gradient(135deg, #007bff, #28a745); text-align: center; padding: 30px;">
+              <img src="https://ik.imagekit.io/sentyaztie/Dlogo.png?updatedAt=1749928182723" alt="SoSapient Logo" style="height: 70px; margin-bottom: 15px;" />
+              <h1 style="color: #ffffff; font-size: 26px; margin: 0;">Welcome Aboard, ${user.firstName}!</h1>
+              <p style="color: #e3fcef; font-size: 15px; margin: 10px 0 0;">We're thrilled to have you join SoSapient Inc.</p>
+            </div>
+
+            <!-- Main Body -->
+            <div style="padding: 35px 30px; color: #333333;">
+
+              <p style="font-size: 16px; line-height: 1.6;">Dear <strong>${user.firstName} ${user.lastName}</strong>,</p>
+
+              <p style="font-size: 16px; line-height: 1.6;">
+                Congratulations and welcome to <strong>SoSapient Inc.</strong>! You’ve officially joined us as a valued 
+                <strong>${user.role}</strong>. We’re excited to start this journey with you and can’t wait to see the impact you’ll make.
+              </p>
+
+              <!-- Account Details Card -->
+              <div style="background-color: #f8fafc; border-left: 5px solid #007bff; padding: 20px; border-radius: 6px; margin: 25px 0;">
+                <h3 style="margin-top: 0; color: #007bff;">📋 Your Account Details</h3>
+                <p style="margin: 5px 0;"><strong>Email:</strong> ${user.email}</p>
+                <p style="margin: 5px 0;"><strong>Role:</strong> ${user.role}</p>
+                <p style="margin: 5px 0;"><strong>Joining Date:</strong> ${user.joiningDate ? new Date(user.joiningDate).toLocaleDateString() : 'Not specified'}</p>
+                <p style="margin: 5px 0;"><strong>Status:</strong> ${user.status}</p>
+              </div>
+
+              <!-- Onboarding Info -->
+              <p style="font-size: 16px; line-height: 1.6;">
+                As part of your onboarding, you’ll gain access to our <strong>HRMS Platform</strong> where you can:
+              </p>
+              <ul style="font-size: 15px; line-height: 1.7; color: #555;">
+                <li>Manage your personal profile and documents 📄</li>
+                <li>Access company policies and employee resources 📘</li>
+                <li>Track attendance, leaves, and performance 🌟</li>
+                <li>Stay updated with announcements and events 📅</li>
+              </ul>
+
+              <!-- Call to Action -->
+              <div style="text-align: center; margin: 35px 0;">
+                <a href="${loginUrl}" 
+                  style="background: linear-gradient(90deg, #007bff, #28a745); color: #fff; padding: 14px 35px; 
+                         text-decoration: none; font-size: 16px; border-radius: 50px; display: inline-block; 
+                         font-weight: bold; box-shadow: 0 4px 10px rgba(0, 123, 255, 0.3); transition: all 0.3s ease;">
+                  Access Your Account
+                </a>
+              </div>
+
+              <p style="font-size: 15px; color: #555;">
+                You can log in using your registered email and password. For any issues or guidance during your onboarding, our HR team is always here to help.
+              </p>
+
+              <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;" />
+
+              <p style="font-size: 15px; color: #555;">
+                Once again, welcome to the <strong>SoSapient family</strong>! We believe that your talent and enthusiasm will help us grow stronger together. Let’s build a smarter and more innovative tomorrow.
+              </p>
+
+              <p style="font-size: 15px; color: #007bff; text-align: center; font-style: italic; margin-top: 25px;">
+                “Great journeys begin with great teams — and we’re glad you’re part of ours!”
+              </p>
+            </div>
+
+            <!-- Footer -->
+            <div style="background-color: #f0f0f0; text-align: center; padding: 20px; font-size: 13px; color: #666;">
+              <p style="margin: 5px 0;"><strong>SoSapient Inc.</strong></p>
+              <p style="margin: 5px 0;">B4, GECU IT Park, Ujjain Ring Road, Ujjain (M.P.) 456010</p>
+              <p style="margin: 5px 0;">📞 +91-9685533878 | ✉️ <a href="mailto:hr@sosapient.in" style="color: #007bff; text-decoration: none;">hr@sosapient.in</a></p>
+              <p style="margin-top: 10px; font-size: 12px; color: #999;">
+                © ${new Date().getFullYear()} SoSapient Inc. All rights reserved.
+              </p>
+            </div>
+
+          </div>
+        </div>
+      `
+    };
+
+    await transporter.sendMail(mailOptions);
+    console.log(`✨ Welcome email sent successfully to ${user.email}`);
+  } catch (error) {
+    console.error('Error sending welcome email:', error);
+  }
+};
+
 
 const getUsers = async (req, res) => {
   try {
@@ -195,7 +304,10 @@ const createUser = async (req, res) => {
     const user = new User(userData);
     await user.save();
 
-    return res.status(201).json({ message: 'User created', userId: user._id });
+    // Send welcome email to new employee
+    await sendWelcomeEmail(user);
+
+    return res.status(201).json({ message: 'User created successfully', userId: user._id });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Server error', error: err.message });
