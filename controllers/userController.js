@@ -242,4 +242,59 @@ const unsubscribePush = async (req, res) => {
   }
 };
 
-module.exports = { getUsers, getUserById, updateUser, deleteUser, createUser, subscribePush, unsubscribePush };
+const saveDashboardPreferences = async (req, res) => {
+  try {
+    const { projects, teams, todos, tickets } = req.body;
+    const userId = req.user._id;
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      {
+        dashboardPreferences: {
+          projects: projects ?? true,
+          teams: teams ?? true,
+          todos: todos ?? true,
+          tickets: tickets ?? true,
+        }
+      },
+      { new: true }
+    );
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    res.json({
+      message: 'Dashboard preferences saved successfully',
+      preferences: user.dashboardPreferences
+    });
+  } catch (error) {
+    console.error('Error saving dashboard preferences:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+const getDashboardPreferences = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    const user = await User.findById(userId).select('dashboardPreferences');
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    res.json({
+      preferences: user.dashboardPreferences || {
+        projects: true,
+        teams: true,
+        todos: true,
+        tickets: true,
+      }
+    });
+  } catch (error) {
+    console.error('Error getting dashboard preferences:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+module.exports = { getUsers, getUserById, updateUser, deleteUser, createUser, subscribePush, unsubscribePush, saveDashboardPreferences, getDashboardPreferences };

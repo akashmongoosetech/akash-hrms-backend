@@ -58,6 +58,12 @@ const userSchema = new mongoose.Schema({
       auth: { type: String, required: true }
     }
   }],
+  dashboardPreferences: {
+    projects: { type: Boolean, default: true },
+    teams: { type: Boolean, default: true },
+    todos: { type: Boolean, default: true },
+    tickets: { type: Boolean, default: true },
+  },
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);
