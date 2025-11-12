@@ -55,7 +55,35 @@ const createComment = async (req, res) => {
   }
 };
 
+const deleteComment = async (req, res) => {
+  try {
+    const { commentId } = req.params;
+    const userId = req.user._id;
+
+    const comment = await Comment.findById(commentId);
+    if (!comment) {
+      return res.status(404).json({ message: 'Comment not found' });
+    }
+
+    if (comment.user.toString() !== userId.toString()) {
+      return res.status(403).json({ message: 'You can only delete your own comments' });
+    }
+
+    await Comment.findByIdAndDelete(commentId);
+
+    // Emit real-time comment deletion to all users viewing this ticket
+    const io = req.app.get('io');
+    io.emit(`comment-deleted-${comment.ticket}`, commentId);
+
+    res.json({ message: 'Comment deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting comment:', error.message);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 module.exports = {
   getComments,
-  createComment
+  createComment,
+  deleteComment
 };
