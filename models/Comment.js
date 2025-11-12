@@ -4,6 +4,12 @@ const commentSchema = new mongoose.Schema({
   ticket: { type: mongoose.Schema.Types.ObjectId, ref: 'Ticket', required: true },
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   message: { type: String, required: true },
+  attachments: [{
+    filename: { type: String, required: true },
+    originalname: { type: String, required: true },
+    mimetype: { type: String, required: true },
+    size: { type: Number, required: true }
+  }]
 }, { timestamps: true });
 
 module.exports = mongoose.model('Comment', commentSchema);

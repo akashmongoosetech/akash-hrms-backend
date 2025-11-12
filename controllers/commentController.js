@@ -27,10 +27,18 @@ const createComment = async (req, res) => {
       return res.status(400).json({ message: 'Message is required' });
     }
 
+    const attachments = req.files ? req.files.map(file => ({
+      filename: file.filename,
+      originalname: file.originalname,
+      mimetype: file.mimetype,
+      size: file.size
+    })) : [];
+
     const comment = new Comment({
       ticket: ticketId,
       user: userId,
-      message: message.trim()
+      message: message.trim(),
+      attachments
     });
 
     await comment.save();
