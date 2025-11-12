@@ -11,7 +11,7 @@ const getProjects = async (req, res) => {
     // For Admin and SuperAdmin, no filter (show all)
 
     const projects = await Project.find(query)
-      .populate('client', 'name email profile')
+      .populate('client', 'name email profile status')
       .populate('teamMembers', 'firstName lastName email photo')
       .sort({ createdAt: -1 });
     res.json(projects);
@@ -24,7 +24,7 @@ const getProjects = async (req, res) => {
 const getProjectById = async (req, res) => {
   try {
     const project = await Project.findById(req.params.id)
-      .populate('client', 'name email profile')
+      .populate('client', 'name email profile status')
       .populate('teamMembers', 'firstName lastName email photo');
     if (!project) return res.status(404).json({ message: 'Project not found' });
     res.json(project);
@@ -56,7 +56,7 @@ const createProject = async (req, res) => {
     await project.save();
 
     const populatedProject = await Project.findById(project._id)
-      .populate('client', 'name email profile')
+      .populate('client', 'name email profile status')
       .populate('teamMembers', 'firstName lastName email photo');
 
     // Get all employees to send push notifications
@@ -119,7 +119,7 @@ const updateProject = async (req, res) => {
     const updates = req.body;
 
     const project = await Project.findByIdAndUpdate(id, updates, { new: true, runValidators: true })
-      .populate('client', 'name email profile')
+      .populate('client', 'name email profile status')
       .populate('teamMembers', 'firstName lastName email photo');
     if (!project) return res.status(404).json({ message: 'Project not found' });
 
