@@ -1,5 +1,6 @@
 const Event = require('../models/Event');
 const User = require('../models/User');
+const { createNotificationsForAllUsers } = require('./notificationController');
 const webpush = require('web-push');
 
 const getEvents = async (req, res) => {
@@ -34,20 +35,33 @@ const createEvent = async (req, res) => {
     const event = new Event({ name, date });
     await event.save();
 
-    // Get all employees to send push notifications
-    const employees = await User.find({ role: 'Employee' });
+    // Create persistent notifications for all users
+    try {
+      await createNotificationsForAllUsers(
+        'event_created',
+        'New Event Added',
+        `New event: ${name} on ${new Date(date).toLocaleDateString()}`,
+        { eventId: event._id, eventName: name, eventDate: date }
+      );
+    } catch (notificationError) {
+      console.error('Error creating notifications:', notificationError);
+      // Don't fail the event creation if notifications fail
+    }
 
-    // Emit real-time notification to all employees
+    // Get all users to send push notifications
+    const allUsers = await User.find({ status: 'Active' });
+
+    // Emit real-time notification to all users
     const io = req.app.get('io');
-    employees.forEach(employee => {
-      io.emit(`event-notification-${employee._id}`, {
+    allUsers.forEach(user => {
+      io.emit(`event-notification-${user._id}`, {
         type: 'new_event',
         message: `New event: ${name}`,
         event: event
       });
      });
 
-    // Send push notifications to all employees
+    // Send push notifications to all users
     const notificationPayload = {
       title: '🎊 New Event Added',
       body: `${name} on ${new Date(date).toLocaleDateString()}`,
@@ -60,15 +74,15 @@ const createEvent = async (req, res) => {
       }
     };
 
-    // Send push notifications to all subscribed employees
-    const pushPromises = employees.map(async (employee) => {
-      if (employee.pushSubscriptions && employee.pushSubscriptions.length > 0) {
-        const promises = employee.pushSubscriptions.map(subscription =>
+    // Send push notifications to all subscribed users
+    const pushPromises = allUsers.map(async (user) => {
+      if (user.pushSubscriptions && user.pushSubscriptions.length > 0) {
+        const promises = user.pushSubscriptions.map(subscription =>
           webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
             .catch(error => {
               // Remove invalid subscriptions
               if (error.statusCode === 410) {
-                User.findByIdAndUpdate(employee._id, {
+                User.findByIdAndUpdate(user._id, {
                   $pull: { pushSubscriptions: subscription }
                 }).exec();
               }
@@ -96,19 +110,32 @@ const updateEvent = async (req, res) => {
     const event = await Event.findByIdAndUpdate(id, updates, { new: true, runValidators: true });
     if (!event) return res.status(404).json({ message: 'Event not found' });
 
-    // Get all employees to send push notifications
-    const employees = await User.find({ role: 'Employee' });
+    // Create persistent notifications for all users
+    try {
+      await createNotificationsForAllUsers(
+        'event_updated',
+        'Event Updated',
+        `Event "${event.name}" has been updated`,
+        { eventId: event._id, eventName: event.name, eventDate: event.date }
+      );
+    } catch (notificationError) {
+      console.error('Error creating notifications:', notificationError);
+      // Don't fail the event update if notifications fail
+    }
+
+    // Get all users to send push notifications
+    const allUsers = await User.find({ status: 'Active' });
 
     const io = req.app.get('io');
-    employees.forEach(employee => {
-      io.emit(`event-notification-${employee._id}`, {
+    allUsers.forEach(user => {
+      io.emit(`event-notification-${user._id}`, {
         type: 'updated_event',
         message: `Event Updated: ${event.name}`,
         event: event
       });
      });
 
-    // Send push notifications to all employees
+    // Send push notifications to all users
     const notificationPayload = {
       title: '📅 Event Updated',
       body: `${event.name} has been updated`,
@@ -121,15 +148,15 @@ const updateEvent = async (req, res) => {
       }
     };
 
-    // Send push notifications to all subscribed employees
-    const pushPromises = employees.map(async (employee) => {
-      if (employee.pushSubscriptions && employee.pushSubscriptions.length > 0) {
-        const promises = employee.pushSubscriptions.map(subscription =>
+    // Send push notifications to all subscribed users
+    const pushPromises = allUsers.map(async (user) => {
+      if (user.pushSubscriptions && user.pushSubscriptions.length > 0) {
+        const promises = user.pushSubscriptions.map(subscription =>
           webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
             .catch(error => {
               // Remove invalid subscriptions
               if (error.statusCode === 410) {
-                User.findByIdAndUpdate(employee._id, {
+                User.findByIdAndUpdate(user._id, {
                   $pull: { pushSubscriptions: subscription }
                 }).exec();
               }
@@ -156,12 +183,25 @@ const deleteEvent = async (req, res) => {
     const event = await Event.findByIdAndDelete(id);
     if (!event) return res.status(404).json({ message: 'Event not found' });
 
-    // Get all employees to send push notifications
-    const employees = await User.find({ role: 'Employee' });
+    // Create persistent notifications for all users
+    try {
+      await createNotificationsForAllUsers(
+        'event_deleted',
+        'Event Removed',
+        `Event "${event.name}" has been deleted`,
+        { eventId: event._id, eventName: event.name, eventDate: event.date }
+      );
+    } catch (notificationError) {
+      console.error('Error creating notifications:', notificationError);
+      // Don't fail the event deletion if notifications fail
+    }
+
+    // Get all users to send push notifications
+    const allUsers = await User.find({ status: 'Active' });
 
     const io = req.app.get('io');
-    employees.forEach(employee => {
-      io.emit(`event-notification-${employee._id}`, {
+    allUsers.forEach(user => {
+      io.emit(`event-notification-${user._id}`, {
         type: 'deleted_event',
         message: `Event Deleted: ${event.name}`,
         event: event
@@ -169,7 +209,7 @@ const deleteEvent = async (req, res) => {
      });
 
 
-    // Send push notifications to all employees
+    // Send push notifications to all users
     const notificationPayload = {
       title: '🚫 Event Removed',
       body: `${event.name} has been deleted`,
@@ -182,15 +222,15 @@ const deleteEvent = async (req, res) => {
       }
     };
 
-    // Send push notifications to all subscribed employees
-    const pushPromises = employees.map(async (employee) => {
-      if (employee.pushSubscriptions && employee.pushSubscriptions.length > 0) {
-        const promises = employee.pushSubscriptions.map(subscription =>
+    // Send push notifications to all subscribed users
+    const pushPromises = allUsers.map(async (user) => {
+      if (user.pushSubscriptions && user.pushSubscriptions.length > 0) {
+        const promises = user.pushSubscriptions.map(subscription =>
           webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
             .catch(error => {
               // Remove invalid subscriptions
               if (error.statusCode === 410) {
-                User.findByIdAndUpdate(employee._id, {
+                User.findByIdAndUpdate(user._id, {
                   $pull: { pushSubscriptions: subscription }
                 }).exec();
               }

@@ -1,5 +1,6 @@
 const Ticket = require('../models/Ticket');
 const User = require('../models/User');
+const { createNotificationsForAllUsers } = require('./notificationController');
 const webpush = require('web-push');
 
 const getTickets = async (req, res) => {
@@ -57,45 +58,68 @@ const createTicket = async (req, res) => {
     const ticket = new Ticket(ticketData);
     await ticket.save();
 
-    // Emit real-time notification to the employee
+    // Populate ticket with employee data
+    await ticket.populate('employee', 'firstName lastName email photo');
+
+    // Create persistent notifications for all users
+    try {
+      await createNotificationsForAllUsers(
+        'ticket_created',
+        'New Ticket Assigned',
+        `New ticket "${title}" assigned to ${ticket.employee.firstName} ${ticket.employee.lastName}`,
+        { ticketId: ticket._id, ticketTitle: title, employeeName: `${ticket.employee.firstName} ${ticket.employee.lastName}` }
+      );
+    } catch (notificationError) {
+      console.error('Error creating notifications:', notificationError);
+      // Don't fail the ticket creation if notifications fail
+    }
+
+    // Get all users to send push notifications
+    const allUsers = await User.find({ status: 'Active' });
+
+    // Emit real-time notification to all users
     const io = req.app.get('io');
-    io.emit(`ticket-notification-${employee}`, {
-      type: 'new_ticket',
-      message: `New ticket assigned: ${title}`,
-      ticket: ticket
+    allUsers.forEach(user => {
+      io.emit(`ticket-notification-${user._id}`, {
+        type: 'new_ticket',
+        message: `New ticket assigned: ${title}`,
+        ticket: ticket
+      });
     });
 
-    // Send push notification only to the assigned employee
-    const assignedEmployee = await User.findById(employee);
-    if (assignedEmployee && assignedEmployee.role === 'Employee') {
-      const notificationPayload = {
-        title: '🎫 New Ticket Assigned',
-        body: `You have been assigned: ${title}`,
-        icon: '/favicon.ico',
-        badge: '/favicon.ico',
-        url: '/tickets',
-        data: {
-          ticketId: ticket._id,
-          type: 'new_ticket'
-        }
-      };
+    // Send push notifications to all users
+    const notificationPayload = {
+      title: '🎫 New Ticket Assigned',
+      body: `${title} assigned to ${ticket.employee.firstName} ${ticket.employee.lastName}`,
+      icon: '/favicon.ico',
+      badge: '/favicon.ico',
+      url: '/tickets',
+      data: {
+        ticketId: ticket._id,
+        type: 'new_ticket'
+      }
+    };
 
-      // Send push notification to the assigned employee
-      if (assignedEmployee.pushSubscriptions && assignedEmployee.pushSubscriptions.length > 0) {
-        const promises = assignedEmployee.pushSubscriptions.map(subscription =>
+    // Send push notifications to all subscribed users
+    const pushPromises = allUsers.map(async (user) => {
+      if (user.pushSubscriptions && user.pushSubscriptions.length > 0) {
+        const promises = user.pushSubscriptions.map(subscription =>
           webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
             .catch(error => {
               // Remove invalid subscriptions
               if (error.statusCode === 410) {
-                User.findByIdAndUpdate(assignedEmployee._id, {
+                User.findByIdAndUpdate(user._id, {
                   $pull: { pushSubscriptions: subscription }
                 }).exec();
               }
             })
         );
-        await Promise.all(promises);
+        return Promise.all(promises);
       }
-    }
+    });
+
+    // Execute all push notification promises
+    await Promise.all(pushPromises);
 
     res.status(201).json({ message: 'Ticket created successfully', ticket });
   } catch (err) {
@@ -170,44 +194,65 @@ const updateTicket = async (req, res) => {
       { path: 'progress.updatedBy', select: 'firstName lastName role' }
     ]);
 
-    // Emit real-time progress update to all connected clients for this ticket
+    // Create persistent notifications for all users
+    try {
+      await createNotificationsForAllUsers(
+        'ticket_updated',
+        'Ticket Updated',
+        `Ticket "${ticket.title}" has been updated`,
+        { ticketId: ticket._id, ticketTitle: ticket.title }
+      );
+    } catch (notificationError) {
+      console.error('Error creating notifications:', notificationError);
+      // Don't fail the ticket update if notifications fail
+    }
+
+    // Get all users to send push notifications
+    const allUsers = await User.find({ status: 'Active' });
+
+    // Emit real-time notification to all users
     const io = req.app.get('io');
-    io.emit(`ticket-progress-${id}`, {
-      type: 'progress_update',
-      ticket: ticket
+    allUsers.forEach(user => {
+      io.emit(`ticket-notification-${user._id}`, {
+        type: 'updated_ticket',
+        message: `Ticket updated: ${ticket.title}`,
+        ticket: ticket
+      });
     });
 
-    // Send push notification only to the assigned employee
-    const assignedEmployee = await User.findById(ticket.employee);
-    if (assignedEmployee && assignedEmployee.role === 'Employee') {
-      const notificationPayload = {
-        title: '📈 Ticket Updated',
-        body: `Your ticket "${ticket.title}" has been updated`,
-        icon: '/favicon.ico',
-        badge: '/favicon.ico',
-        url: '/tickets',
-        data: {
-          ticketId: ticket._id,
-          type: 'updated_ticket'
-        }
-      };
+    // Send push notifications to all users
+    const notificationPayload = {
+      title: '📈 Ticket Updated',
+      body: `Ticket "${ticket.title}" has been updated`,
+      icon: '/favicon.ico',
+      badge: '/favicon.ico',
+      url: '/tickets',
+      data: {
+        ticketId: ticket._id,
+        type: 'updated_ticket'
+      }
+    };
 
-      // Send push notification to the assigned employee
-      if (assignedEmployee.pushSubscriptions && assignedEmployee.pushSubscriptions.length > 0) {
-        const promises = assignedEmployee.pushSubscriptions.map(subscription =>
+    // Send push notifications to all subscribed users
+    const pushPromises = allUsers.map(async (user) => {
+      if (user.pushSubscriptions && user.pushSubscriptions.length > 0) {
+        const promises = user.pushSubscriptions.map(subscription =>
           webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
             .catch(error => {
               // Remove invalid subscriptions
               if (error.statusCode === 410) {
-                User.findByIdAndUpdate(assignedEmployee._id, {
+                User.findByIdAndUpdate(user._id, {
                   $pull: { pushSubscriptions: subscription }
                 }).exec();
               }
             })
         );
-        await Promise.all(promises);
+        return Promise.all(promises);
       }
-    }
+    });
+
+    // Execute all push notification promises
+    await Promise.all(pushPromises);
 
     res.json({ message: 'Ticket updated successfully', ticket });
   } catch (err) {
@@ -223,37 +268,65 @@ const deleteTicket = async (req, res) => {
     const ticket = await Ticket.findByIdAndDelete(id);
     if (!ticket) return res.status(404).json({ message: 'Ticket not found' });
 
-    // Send push notification only to the assigned employee
-    const assignedEmployee = await User.findById(ticket.employee);
-    if (assignedEmployee && assignedEmployee.role === 'Employee') {
-      const notificationPayload = {
-        title: '🗑️ Ticket Removed',
-        body: `Your ticket "${ticket.title}" has been deleted`,
-        icon: '/favicon.ico',
-        badge: '/favicon.ico',
-        url: '/tickets',
-        data: {
-          ticketId: id,
-          type: 'deleted_ticket'
-        }
-      };
+    // Create persistent notifications for all users
+    try {
+      await createNotificationsForAllUsers(
+        'ticket_deleted',
+        'Ticket Removed',
+        `Ticket "${ticket.title}" has been deleted`,
+        { ticketId: id, ticketTitle: ticket.title }
+      );
+    } catch (notificationError) {
+      console.error('Error creating notifications:', notificationError);
+      // Don't fail the ticket deletion if notifications fail
+    }
 
-      // Send push notification to the assigned employee
-      if (assignedEmployee.pushSubscriptions && assignedEmployee.pushSubscriptions.length > 0) {
-        const promises = assignedEmployee.pushSubscriptions.map(subscription =>
+    // Get all users to send push notifications
+    const allUsers = await User.find({ status: 'Active' });
+
+    // Emit real-time notification to all users
+    const io = req.app.get('io');
+    allUsers.forEach(user => {
+      io.emit(`ticket-notification-${user._id}`, {
+        type: 'deleted_ticket',
+        message: `Ticket deleted: ${ticket.title}`,
+        ticket: { _id: id, title: ticket.title }
+      });
+    });
+
+    // Send push notifications to all users
+    const notificationPayload = {
+      title: '🗑️ Ticket Removed',
+      body: `Ticket "${ticket.title}" has been deleted`,
+      icon: '/favicon.ico',
+      badge: '/favicon.ico',
+      url: '/tickets',
+      data: {
+        ticketId: id,
+        type: 'deleted_ticket'
+      }
+    };
+
+    // Send push notifications to all subscribed users
+    const pushPromises = allUsers.map(async (user) => {
+      if (user.pushSubscriptions && user.pushSubscriptions.length > 0) {
+        const promises = user.pushSubscriptions.map(subscription =>
           webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
             .catch(error => {
               // Remove invalid subscriptions
               if (error.statusCode === 410) {
-                User.findByIdAndUpdate(assignedEmployee._id, {
+                User.findByIdAndUpdate(user._id, {
                   $pull: { pushSubscriptions: subscription }
                 }).exec();
               }
             })
         );
-        await Promise.all(promises);
+        return Promise.all(promises);
       }
-    }
+    });
+
+    // Execute all push notification promises
+    await Promise.all(pushPromises);
 
     res.json({ message: 'Ticket deleted successfully' });
   } catch (err) {

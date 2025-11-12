@@ -1,5 +1,6 @@
 const Todo = require('../models/Todo');
 const User = require('../models/User');
+const { createNotificationsForAllUsers } = require('./notificationController');
 const webpush = require('web-push');
 
 // Get all todos with employee details
@@ -78,48 +79,65 @@ const createTodo = async (req, res) => {
       .populate('employee', 'firstName lastName email photo')
       .populate('createdBy', 'firstName lastName');
 
-    // Emit real-time update to all connected clients
-    const io = req.app.get('io');
-    io.emit('todo-created', { todo: populatedTodo });
+    // Create persistent notifications for all users
+    try {
+      await createNotificationsForAllUsers(
+        'todo_created',
+        'New Todo Assigned',
+        `New todo "${title}" assigned to ${populatedTodo.employee.firstName} ${populatedTodo.employee.lastName}`,
+        { todoId: populatedTodo._id, todoTitle: title, employeeName: `${populatedTodo.employee.firstName} ${populatedTodo.employee.lastName}` }
+      );
+    } catch (notificationError) {
+      console.error('Error creating notifications:', notificationError);
+      // Don't fail the todo creation if notifications fail
+    }
 
-     // Emit specific notification to the assigned employee
-    io.emit(`todo-notification-${employee}`, {
-      type: 'new_todo',
-      message: `New todo assigned: ${title}`,
-      todo: populatedTodo
+    // Get all users to send push notifications
+    const allUsers = await User.find({ status: 'Active' });
+
+    // Emit real-time notification to all users
+    const io = req.app.get('io');
+    allUsers.forEach(user => {
+      io.emit(`todo-notification-${user._id}`, {
+        type: 'new_todo',
+        message: `New todo assigned: ${title}`,
+        todo: populatedTodo
+      });
     });
 
-    // Send push notification only to the assigned employee
-    const assignedEmployee = await User.findById(employee);
-    if (assignedEmployee && assignedEmployee.role === 'Employee') {
-      const notificationPayload = {
-        title: '📋 New Todo Assigned',
-        body: `You have been assigned: ${title}`,
-        icon: '/favicon.ico',
-        badge: '/favicon.ico',
-        url: '/todo',
-        data: {
-          todoId: populatedTodo._id,
-          type: 'new_todo'
-        }
-      };
+    // Send push notifications to all users
+    const notificationPayload = {
+      title: '📋 New Todo Assigned',
+      body: `${title} assigned to ${populatedTodo.employee.firstName} ${populatedTodo.employee.lastName}`,
+      icon: '/favicon.ico',
+      badge: '/favicon.ico',
+      url: '/todo',
+      data: {
+        todoId: populatedTodo._id,
+        type: 'new_todo'
+      }
+    };
 
-      // Send push notification to the assigned employee
-      if (assignedEmployee.pushSubscriptions && assignedEmployee.pushSubscriptions.length > 0) {
-        const promises = assignedEmployee.pushSubscriptions.map(subscription =>
+    // Send push notifications to all subscribed users
+    const pushPromises = allUsers.map(async (user) => {
+      if (user.pushSubscriptions && user.pushSubscriptions.length > 0) {
+        const promises = user.pushSubscriptions.map(subscription =>
           webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
             .catch(error => {
               // Remove invalid subscriptions
               if (error.statusCode === 410) {
-                User.findByIdAndUpdate(assignedEmployee._id, {
+                User.findByIdAndUpdate(user._id, {
                   $pull: { pushSubscriptions: subscription }
                 }).exec();
               }
             })
         );
-        await Promise.all(promises);
+        return Promise.all(promises);
       }
-    }
+    });
+
+    // Execute all push notification promises
+    await Promise.all(pushPromises);
 
     res.status(201).json({ message: 'Todo created successfully', todo: populatedTodo });
   } catch (err) {
@@ -162,41 +180,65 @@ const updateTodo = async (req, res) => {
       .populate('employee', 'firstName lastName email photo')
       .populate('createdBy', 'firstName lastName');
 
-    // Emit real-time update to all connected clients
+    // Create persistent notifications for all users
+    try {
+      await createNotificationsForAllUsers(
+        'todo_updated',
+        'Todo Updated',
+        `Todo "${updatedTodo.title}" has been updated`,
+        { todoId: updatedTodo._id, todoTitle: updatedTodo.title }
+      );
+    } catch (notificationError) {
+      console.error('Error creating notifications:', notificationError);
+      // Don't fail the todo update if notifications fail
+    }
+
+    // Get all users to send push notifications
+    const allUsers = await User.find({ status: 'Active' });
+
+    // Emit real-time notification to all users
     const io = req.app.get('io');
-    io.emit('todo-updated', { todo: updatedTodo });
+    allUsers.forEach(user => {
+      io.emit(`todo-notification-${user._id}`, {
+        type: 'updated_todo',
+        message: `Todo updated: ${updatedTodo.title}`,
+        todo: updatedTodo
+      });
+    });
 
-    // Send push notification only to the assigned employee
-    const assignedEmployee = await User.findById(updatedTodo.employee);
-    if (assignedEmployee && assignedEmployee.role === 'Employee') {
-      const notificationPayload = {
-        title: '🔄 Todo Updated',
-        body: `Your todo "${updatedTodo.title}" has been updated`,
-        icon: '/favicon.ico',
-        badge: '/favicon.ico',
-        url: '/todo',
-        data: {
-          todoId: updatedTodo._id,
-          type: 'updated_todo'
-        }
-      };
+    // Send push notifications to all users
+    const notificationPayload = {
+      title: '🔄 Todo Updated',
+      body: `Todo "${updatedTodo.title}" has been updated`,
+      icon: '/favicon.ico',
+      badge: '/favicon.ico',
+      url: '/todo',
+      data: {
+        todoId: updatedTodo._id,
+        type: 'updated_todo'
+      }
+    };
 
-      // Send push notification to the assigned employee
-      if (assignedEmployee.pushSubscriptions && assignedEmployee.pushSubscriptions.length > 0) {
-        const promises = assignedEmployee.pushSubscriptions.map(subscription =>
+    // Send push notifications to all subscribed users
+    const pushPromises = allUsers.map(async (user) => {
+      if (user.pushSubscriptions && user.pushSubscriptions.length > 0) {
+        const promises = user.pushSubscriptions.map(subscription =>
           webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
             .catch(error => {
               // Remove invalid subscriptions
               if (error.statusCode === 410) {
-                User.findByIdAndUpdate(assignedEmployee._id, {
+                User.findByIdAndUpdate(user._id, {
                   $pull: { pushSubscriptions: subscription }
                 }).exec();
               }
             })
         );
-        await Promise.all(promises);
+        return Promise.all(promises);
       }
-    }
+    });
+
+    // Execute all push notification promises
+    await Promise.all(pushPromises);
 
     res.json({ message: 'Todo updated successfully', todo: updatedTodo });
   } catch (err) {
@@ -220,41 +262,65 @@ const deleteTodo = async (req, res) => {
 
     await Todo.findByIdAndDelete(id);
 
-    // Emit real-time update to all connected clients
+    // Create persistent notifications for all users
+    try {
+      await createNotificationsForAllUsers(
+        'todo_deleted',
+        'Todo Removed',
+        `Todo "${todo.title}" has been deleted`,
+        { todoId: id, todoTitle: todo.title }
+      );
+    } catch (notificationError) {
+      console.error('Error creating notifications:', notificationError);
+      // Don't fail the todo deletion if notifications fail
+    }
+
+    // Get all users to send push notifications
+    const allUsers = await User.find({ status: 'Active' });
+
+    // Emit real-time notification to all users
     const io = req.app.get('io');
-    io.emit('todo-deleted', { todoId: id });
+    allUsers.forEach(user => {
+      io.emit(`todo-notification-${user._id}`, {
+        type: 'deleted_todo',
+        message: `Todo deleted: ${todo.title}`,
+        todo: { _id: id, title: todo.title }
+      });
+    });
 
-    // Send push notification only to the assigned employee
-    const assignedEmployee = await User.findById(todo.employee);
-    if (assignedEmployee && assignedEmployee.role === 'Employee') {
-      const notificationPayload = {
-        title: '🗑️ Todo Removed',
-        body: `Your todo "${todo.title}" has been deleted`,
-        icon: '/favicon.ico',
-        badge: '/favicon.ico',
-        url: '/todo',
-        data: {
-          todoId: id,
-          type: 'deleted_todo'
-        }
-      };
+    // Send push notifications to all users
+    const notificationPayload = {
+      title: '🗑️ Todo Removed',
+      body: `Todo "${todo.title}" has been deleted`,
+      icon: '/favicon.ico',
+      badge: '/favicon.ico',
+      url: '/todo',
+      data: {
+        todoId: id,
+        type: 'deleted_todo'
+      }
+    };
 
-      // Send push notification to the assigned employee
-      if (assignedEmployee.pushSubscriptions && assignedEmployee.pushSubscriptions.length > 0) {
-        const promises = assignedEmployee.pushSubscriptions.map(subscription =>
+    // Send push notifications to all subscribed users
+    const pushPromises = allUsers.map(async (user) => {
+      if (user.pushSubscriptions && user.pushSubscriptions.length > 0) {
+        const promises = user.pushSubscriptions.map(subscription =>
           webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
             .catch(error => {
               // Remove invalid subscriptions
               if (error.statusCode === 410) {
-                User.findByIdAndUpdate(assignedEmployee._id, {
+                User.findByIdAndUpdate(user._id, {
                   $pull: { pushSubscriptions: subscription }
                 }).exec();
               }
             })
         );
-        await Promise.all(promises);
+        return Promise.all(promises);
       }
-    }
+    });
+
+    // Execute all push notification promises
+    await Promise.all(pushPromises);
 
     res.json({ message: 'Todo deleted successfully' });
   } catch (err) {

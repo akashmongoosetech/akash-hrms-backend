@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const User = require('../models/User');
+const Notification = require('../models/Notification');
 
 const signup = async (req, res) => {
   try {
@@ -72,7 +73,29 @@ const login = async (req, res) => {
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '7d' });
     const refreshToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '30d' });
 
-    return res.json({ token, refreshToken, role: user.role, userId: user._id, firstName: user.firstName, lastName: user.lastName });
+    // Get unread notifications count
+    const unreadCount = await Notification.countDocuments({ user: user._id, read: false });
+
+    // Send login notification to all employees
+    const employees = await User.find({ role: 'Employee' });
+    const io = req.app.get('io');
+    employees.forEach(employee => {
+      io.emit(`login-notification-${employee._id}`, {
+        type: 'employee_login',
+        message: `${user.firstName} ${user.lastName} has logged in`,
+        user: { _id: user._id, firstName: user.firstName, lastName: user.lastName }
+      });
+    });
+
+    return res.json({
+      token,
+      refreshToken,
+      role: user.role,
+      userId: user._id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      unreadNotifications: unreadCount
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
