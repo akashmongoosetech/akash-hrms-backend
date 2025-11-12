@@ -33,7 +33,7 @@ router.post('/dashboard-preferences', authenticate, userController.saveDashboard
 router.get('/dashboard-preferences', authenticate, userController.getDashboardPreferences);
 
 // Push notification subscription routes
-// router.post('/subscribe-push', authenticate, userController.subscribePush);
-// router.post('/unsubscribe-push', authenticate, userController.unsubscribePush);
+router.post('/subscribe-push', authenticate, userController.subscribePush);
+router.post('/unsubscribe-push', authenticate, userController.unsubscribePush);
 
 module.exports = router;
