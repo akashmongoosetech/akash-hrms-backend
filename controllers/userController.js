@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
 const User = require('../models/User');
+const DeletedEmployee = require('../models/DeletedEmployee');
 const webpush = require('web-push');
 
 // Create transporter for email
@@ -117,8 +118,8 @@ const getUsers = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const totalUsers = await User.countDocuments();
-    const users = await User.find({}, '-password').populate('department').sort({ createdAt: -1 }).skip(skip).limit(limit);
+    const totalUsers = await User.countDocuments({ status: { $ne: 'Deleted' } });
+    const users = await User.find({ status: { $ne: 'Deleted' } }, '-password').populate('department').sort({ createdAt: -1 }).skip(skip).limit(limit);
 
     res.json({
       users,
@@ -236,8 +237,34 @@ const deleteUser = async (req, res) => {
       return res.status(400).json({ message: 'Cannot delete your own account' });
     }
 
-    const user = await User.findByIdAndDelete(id);
+    const user = await User.findById(id);
     if (!user) return res.status(404).json({ message: 'User not found' });
+
+    // Check if already deleted
+    const existingDeleted = await DeletedEmployee.findOne({ email: user.email });
+    if (existingDeleted) {
+      return res.status(400).json({ message: 'User already deleted' });
+    }
+
+    // Save to deleted employees table
+    const deletedEmployee = new DeletedEmployee({
+      email: user.email,
+      originalUserId: user._id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role,
+      department: user.department,
+      deletedBy: req.user._id,
+      reason: req.body.reason || ''
+    });
+    await deletedEmployee.save();
+
+    // Update user status to Deleted
+    await User.findByIdAndUpdate(id, { status: 'Deleted' });
+
+    // Emit logout event to the deleted user on all devices
+    const io = req.app.get('io');
+    io.to(id).emit('logout', { reason: 'account_deleted' });
 
     res.json({ message: 'User deleted successfully' });
   } catch (err) {

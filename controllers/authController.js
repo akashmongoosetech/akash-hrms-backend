@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const User = require('../models/User');
+const DeletedEmployee = require('../models/DeletedEmployee');
 const Notification = require('../models/Notification');
 
 const signup = async (req, res) => {
@@ -64,8 +65,14 @@ const login = async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ message: 'Missing email or password' });
 
+    // Check if email belongs to a deleted employee
+    const deletedEmployee = await DeletedEmployee.findOne({ email });
+    if (deletedEmployee) {
+      return res.status(403).json({ message: 'Your Account is Suspended. Please Contact Admin.' });
+    }
+
     const user = await User.findOne({ email });
-    if (!user) return res.status(401).json({ message: 'Invalid credentials' });
+    if (!user || user.status === 'Deleted') return res.status(401).json({ message: 'Invalid credentials' });
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(401).json({ message: 'Invalid credentials' });
@@ -86,6 +93,9 @@ const login = async (req, res) => {
         user: { _id: user._id, firstName: user.firstName, lastName: user.lastName }
       });
     });
+
+    // Emit logout to terminate previous sessions
+    io.to(user._id.toString()).emit('logout', { reason: 'new_login' });
 
     return res.json({
       token,

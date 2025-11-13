@@ -8,7 +8,7 @@ const authenticate = async (req, res, next) => {
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findById(payload.id);
-    if (!user) return res.status(401).json({ message: 'User not found' });
+    if (!user || user.status === 'Deleted') return res.status(401).json({ message: 'User not found' });
     req.user = user; // attach user
     next();
   } catch (err) {
