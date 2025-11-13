@@ -46,6 +46,7 @@ app.use('/api/teams', require('./routes/teams'));
 app.use('/api/todos', require('./routes/todos'));
 app.use('/api/tickets', require('./routes/tickets'));
 app.use('/api/comments', require('./routes/comments'));
+app.use('/api/uploads', require('./routes/uploads'));
 app.use('/api/breaks', require('./routes/breaks'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/links', require('./routes/links'));
