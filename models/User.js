@@ -58,6 +58,7 @@ const userSchema = new mongoose.Schema({
       auth: { type: String, required: true }
     }
   }],
+  profilePictures: [{ type: String }], // Array of profile picture file paths
   dashboardPreferences: {
     projects: { type: Boolean, default: true },
     teams: { type: Boolean, default: true },

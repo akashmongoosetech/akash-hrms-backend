@@ -201,6 +201,11 @@ const updateUser = async (req, res) => {
       if (req.files['photo']) updates.photo = req.files['photo'][0].path;
     }
 
+    // Handle profilePictures updates (if sent as JSON)
+    if (updates.profilePictures && typeof updates.profilePictures === 'string') {
+      updates.profilePictures = JSON.parse(updates.profilePictures);
+    }
+
     // Handle password update
     if (updates.password && updates.password.trim() !== '') {
       updates.password = await bcrypt.hash(updates.password, 10);
