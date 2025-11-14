@@ -5,7 +5,7 @@ const axios = require('axios');
 const fetchAndSaveCandidates = async (req, res) => {
   try {
     console.log('Fetching candidates from external API...');
-    const response = await axios.get('https://sosapient-backend.onrender.com/api/career');
+    const response = await axios.get(process.env.CAREER_URL);
     console.log('API Response:', response.data);
 
     const candidatesData = response.data.data; // The API returns { success: true, data: [...] }
@@ -59,8 +59,14 @@ const fetchAndSaveCandidates = async (req, res) => {
 // Get all candidates from DB
 const getCandidates = async (req, res) => {
   try {
-    const candidates = await Candidate.find().sort({ createdAt: -1 });
-    res.status(200).json(candidates);
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    const candidates = await Candidate.find().sort({ createdAt: -1 }).skip(skip).limit(limit);
+    const total = await Candidate.countDocuments();
+
+    res.status(200).json({ candidates, total });
   } catch (error) {
     console.error('Error fetching candidates:', error);
     res.status(500).json({ message: 'Error fetching candidates', error: error.message });

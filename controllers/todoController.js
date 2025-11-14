@@ -6,21 +6,34 @@ const webpush = require('web-push');
 // Get all todos with employee details
 const getTodos = async (req, res) => {
   try {
-    let todos;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
+    let query = {};
     if (req.user.role === 'Employee') {
       // Employees can only see their own todos
-      todos = await Todo.find({ employee: req.user._id })
-        .populate('employee', 'firstName lastName email photo')
-        .populate('createdBy', 'firstName lastName')
-        .sort({ createdAt: -1 });
-    } else {
-      // Admins and SuperAdmins can see all todos
-      todos = await Todo.find({})
-        .populate('employee', 'firstName lastName email photo')
-        .populate('createdBy', 'firstName lastName')
-        .sort({ createdAt: -1 });
+      query.employee = req.user._id;
     }
-    res.json(todos);
+    // Admins and SuperAdmins can see all todos (no additional filter)
+
+    const totalTodos = await Todo.countDocuments(query);
+    const todos = await Todo.find(query)
+      .populate('employee', 'firstName lastName email photo')
+      .populate('createdBy', 'firstName lastName')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    res.json({
+      todos,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(totalTodos / limit),
+        totalItems: totalTodos,
+        itemsPerPage: limit
+      }
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });

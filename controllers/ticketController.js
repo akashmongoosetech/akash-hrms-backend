@@ -7,6 +7,9 @@ const getTickets = async (req, res) => {
   try {
     const userRole = req.user.role;
     const userId = req.user.id;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
 
     let query = {};
 
@@ -15,10 +18,22 @@ const getTickets = async (req, res) => {
       query.employee = userId;
     }
 
+    const totalTickets = await Ticket.countDocuments(query);
     const tickets = await Ticket.find(query)
       .populate('employee', 'firstName lastName email photo')
-      .sort({ createdAt: -1 });
-    res.json(tickets);
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    res.json({
+      tickets,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(totalTickets / limit),
+        totalItems: totalTickets,
+        itemsPerPage: limit
+      }
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });

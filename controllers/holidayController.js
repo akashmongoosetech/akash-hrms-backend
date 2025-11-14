@@ -5,6 +5,9 @@ const webpush = require('web-push');
 
 const getHolidays = async (req, res) => {
   try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
     const search = req.query.search || '';
 
     let query = {};
@@ -12,9 +15,18 @@ const getHolidays = async (req, res) => {
       query.name = { $regex: search, $options: 'i' };
     }
 
-    const holidays = await Holiday.find(query).sort({ date: 1 });
+    const totalHolidays = await Holiday.countDocuments(query);
+    const holidays = await Holiday.find(query).sort({ date: 1 }).skip(skip).limit(limit);
 
-    res.json(holidays);
+    res.json({
+      holidays,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(totalHolidays / limit),
+        totalItems: totalHolidays,
+        itemsPerPage: limit
+      }
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });

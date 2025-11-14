@@ -2,14 +2,30 @@ const Link = require('../models/Link');
 
 const getLinks = async (req, res) => {
   try {
-    const { type } = req.query;
+    const { type, page = 1, limit = 10 } = req.query;
     let query = {};
     if (type) {
       query.type = type;
     }
 
-    const links = await Link.find(query).sort({ createdAt: -1 });
-    res.json(links);
+    const pageNum = parseInt(page, 10);
+    const limitNum = parseInt(limit, 10);
+    const skip = (pageNum - 1) * limitNum;
+
+    const totalItems = await Link.countDocuments(query);
+    const totalPages = Math.ceil(totalItems / limitNum);
+
+    const links = await Link.find(query)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limitNum);
+
+    res.json({
+      links,
+      totalPages,
+      totalItems,
+      currentPage: pageNum
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });

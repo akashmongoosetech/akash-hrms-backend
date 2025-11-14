@@ -4,17 +4,33 @@ const webpush = require('web-push');
 
 const getProjects = async (req, res) => {
   try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 10;
+    const skip = (page - 1) * limit;
+
     let query = {};
     if (req.user.role === 'Employee') {
       query = { teamMembers: req.user._id };
     }
     // For Admin and SuperAdmin, no filter (show all)
 
+    const totalProjects = await Project.countDocuments(query);
     const projects = await Project.find(query)
       .populate('client', 'name email profile status')
       .populate('teamMembers', 'firstName lastName email photo')
-      .sort({ createdAt: -1 });
-    res.json(projects);
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    res.json({
+      projects,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(totalProjects / limit),
+        totalItems: totalProjects,
+        itemsPerPage: limit
+      }
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
