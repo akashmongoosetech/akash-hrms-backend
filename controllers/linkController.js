@@ -74,7 +74,13 @@ const createLink = async (req, res) => {
 const updateLink = async (req, res) => {
   try {
     const { id } = req.params;
-    const updates = req.body;
+    const { type, title, url, image } = req.body;
+    const file = req.file ? req.file.path : undefined;
+
+    const updates = { type, title, url, image };
+    if (file !== undefined) {
+      updates.file = file;
+    }
 
     const link = await Link.findByIdAndUpdate(id, updates, { new: true, runValidators: true });
     if (!link) return res.status(404).json({ message: 'Link not found' });

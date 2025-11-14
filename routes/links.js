@@ -15,7 +15,7 @@ router.get('/:id', authenticate, authorizeRoles('Employee'), linkController.getL
 router.post('/', authenticate, authorizeRoles('Admin'), upload.single('file'), linkController.createLink);
 
 // Update link - Admin and SuperAdmin only
-router.put('/:id', authenticate, authorizeRoles('Admin'), linkController.updateLink);
+router.put('/:id', authenticate, authorizeRoles('Admin'), upload.single('file'), linkController.updateLink);
 
 // Delete link - SuperAdmin only
 router.delete('/:id', authenticate, authorizeRoles('SuperAdmin'), linkController.deleteLink);
