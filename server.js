@@ -56,6 +56,7 @@ app.use('/api/candidates', require('./routes/candidates'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/payments', require('./routes/payments'));
+app.use('/api/blogs', require('./routes/blogs'));
 app.use('/api/expenses', require('./routes/expenses'));
 
 // example protected route
