@@ -39,6 +39,7 @@ app.use('/api/users', require('./routes/users'));
 app.use('/api/departments', require('./routes/departments'));
 app.use('/api/holidays', require('./routes/holidays'));
 app.use('/api/saturdays', require('./routes/saturdays'));
+app.use('/api/alternate-saturdays', require('./routes/alternateSaturdays'));
 app.use('/api/events', require('./routes/events'));
 app.use('/api/clients', require('./routes/clients'));
 app.use('/api/projects', require('./routes/projects'));
