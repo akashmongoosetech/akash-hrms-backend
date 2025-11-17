@@ -1,0 +1,169 @@
+const Message = require('../models/Message');
+const User = require('../models/User');
+
+// Send a message
+const sendMessage = async (req, res) => {
+  try {
+    const { receiverId, message } = req.body;
+    const senderId = req.user._id;
+    const trimmedMessage = message.trim();
+
+    console.log('req.body:', req.body);
+    console.log('req.files:', req.files);
+    console.log('trimmedMessage:', trimmedMessage);
+
+    if (!receiverId || (!trimmedMessage && !(req.files && req.files['file'] && req.files['file'].length > 0))) {
+      return res.status(400).json({ message: 'Receiver and message are required if no file is attached' });
+    }
+
+    const receiver = await User.findById(receiverId);
+    if (!receiver) {
+      return res.status(404).json({ message: 'Receiver not found' });
+    }
+
+    const messageData = {
+      sender: senderId,
+      receiver: receiverId,
+      message: trimmedMessage,
+    };
+
+    // Handle file upload
+    if (req.files && req.files['file'] && req.files['file'].length > 0) {
+      const file = req.files['file'][0];
+      messageData.file = {
+        name: file.originalname,
+        path: file.path,
+        type: file.mimetype,
+        size: file.size,
+      };
+    }
+
+    console.log('messageData:', messageData);
+
+    const newMessage = new Message(messageData);
+    await newMessage.save();
+
+    // Emit to receiver via socket
+    const io = req.app.get('io');
+    io.to(receiverId.toString()).emit('newMessage', {
+      _id: newMessage._id.toString(),
+      sender: { _id: senderId.toString(), firstName: req.user.firstName, lastName: req.user.lastName },
+      receiver: receiverId.toString(),
+      message: trimmedMessage,
+      file: messageData.file,
+      createdAt: newMessage.createdAt,
+      read: false,
+    });
+
+    res.status(201).json({ message: 'Message sent successfully', data: newMessage });
+  } catch (error) {
+    console.error('Error sending message:', error.message);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Get messages between current user and another user
+const getMessages = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const currentUserId = req.user._id;
+
+    const messages = await Message.find({
+      $or: [
+        { sender: currentUserId, receiver: userId },
+        { sender: userId, receiver: currentUserId }
+      ]
+    }).populate('sender', 'firstName lastName').sort({ createdAt: 1 });
+
+    res.json({ messages });
+  } catch (error) {
+    console.error('Error fetching messages:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Get list of users the current user has chatted with
+const getChatUsers = async (req, res) => {
+  try {
+    const currentUserId = req.user._id;
+
+    const messages = await Message.find({
+      $or: [
+        { sender: currentUserId },
+        { receiver: currentUserId }
+      ]
+    }).populate('sender', 'firstName lastName email').populate('receiver', 'firstName lastName email').sort({ createdAt: -1 });
+
+    const chatUsers = new Map();
+
+    messages.forEach(msg => {
+      const otherUser = msg.sender._id.toString() === currentUserId.toString() ? msg.receiver : msg.sender;
+      if (!chatUsers.has(otherUser._id.toString())) {
+        chatUsers.set(otherUser._id.toString(), {
+          _id: otherUser._id.toString(),
+          firstName: otherUser.firstName,
+          lastName: otherUser.lastName,
+          email: otherUser.email,
+          lastMessage: msg.message,
+          lastMessageTime: msg.createdAt,
+        });
+      }
+    });
+
+    res.json({ chatUsers: Array.from(chatUsers.values()) });
+  } catch (error) {
+    console.error('Error fetching chat users:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Mark messages as read
+const markAsRead = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const currentUserId = req.user._id;
+
+    await Message.updateMany(
+      { sender: userId, receiver: currentUserId, read: false },
+      { read: true }
+    );
+
+    res.json({ message: 'Messages marked as read' });
+  } catch (error) {
+    console.error('Error marking messages as read:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+const searchUsers = async (req, res) => {
+  try {
+    const { query } = req.query;
+    const currentUserId = req.user._id;
+
+    if (!query || query.trim() === '') {
+      return res.json({ users: [] });
+    }
+
+    const users = await User.find({
+      $and: [
+        { _id: { $ne: currentUserId } },
+        { status: { $ne: 'Deleted' } },
+        {
+          $or: [
+            { firstName: { $regex: query, $options: 'i' } },
+            { lastName: { $regex: query, $options: 'i' } },
+            { email: { $regex: query, $options: 'i' } }
+          ]
+        }
+      ]
+    }).select('firstName lastName email role').limit(20);
+
+    res.json({ users });
+  } catch (error) {
+    console.error('Error searching users:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+module.exports = { sendMessage, getMessages, getChatUsers, markAsRead, searchUsers };

@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 const http = require('http');
 const socketIo = require('socket.io');
 const webpush = require('web-push');
@@ -25,6 +26,12 @@ app.use('/api/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // connect DB
 connectDB(process.env.MONGO_URI || 'mongodb://localhost:27017/hrms');
+
+// Ensure uploads directory exists
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
 
 // Configure web-push
 webpush.setVapidDetails(
@@ -59,6 +66,7 @@ app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/payments', require('./routes/payments'));
 app.use('/api/blogs', require('./routes/blogs'));
 app.use('/api/expenses', require('./routes/expenses'));
+app.use('/api/chats', require('./routes/chats'));
 
 // example protected route
 const authenticate = require('./middleware/auth');
