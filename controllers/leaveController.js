@@ -87,7 +87,7 @@ const requestLeave = async (req, res) => {
     await Promise.all(pushPromises);
 
     // Populate the leave with employee data for socket emission
-    const populatedLeave = await Leave.findById(leave._id).populate('employee', 'firstName lastName email');
+    const populatedLeave = await Leave.findById(leave._id).populate({ path: 'employee', select: 'firstName lastName email', match: { status: 'Active' } });
 
     // Emit to all connected clients for live updates
     io.emit('leave-created', populatedLeave);
@@ -112,9 +112,9 @@ const getLeaves = async (req, res) => {
 
     const totalLeaves = await Leave.countDocuments(query);
     const leaves = await Leave.find(query)
-      .populate('employee', 'firstName lastName email')
-      .populate('approvedBy', 'firstName lastName')
-      .populate('rejectedBy', 'firstName lastName')
+      .populate({ path: 'employee', select: 'firstName lastName email', match: { status: 'Active' } })
+      .populate({ path: 'approvedBy', select: 'firstName lastName', match: { status: 'Active' } })
+      .populate({ path: 'rejectedBy', select: 'firstName lastName', match: { status: 'Active' } })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
@@ -143,7 +143,7 @@ const updateLeaveStatus = async (req, res) => {
       return res.status(400).json({ message: 'Invalid status' });
     }
 
-    const leave = await Leave.findById(id).populate('employee', 'firstName lastName email');
+    const leave = await Leave.findById(id).populate({ path: 'employee', select: 'firstName lastName email', match: { status: 'Active' } });
     if (!leave) return res.status(404).json({ message: 'Leave not found' });
 
     const oldStatus = leave.status;
@@ -164,9 +164,9 @@ const updateLeaveStatus = async (req, res) => {
 
     // Populate the leave with updated data for socket emission
     const updatedLeave = await Leave.findById(id)
-      .populate('employee', 'firstName lastName email')
-      .populate('approvedBy', 'firstName lastName')
-      .populate('rejectedBy', 'firstName lastName');
+      .populate({ path: 'employee', select: 'firstName lastName email', match: { status: 'Active' } })
+      .populate({ path: 'approvedBy', select: 'firstName lastName', match: { status: 'Active' } })
+      .populate({ path: 'rejectedBy', select: 'firstName lastName', match: { status: 'Active' } });
 
     // Send push notification to employee if status changed
     if (oldStatus !== status) {
@@ -261,9 +261,9 @@ const updateLeave = async (req, res) => {
 
     // Populate the leave with updated data for socket emission
     const updatedLeave = await Leave.findById(id)
-      .populate('employee', 'firstName lastName email')
-      .populate('approvedBy', 'firstName lastName')
-      .populate('rejectedBy', 'firstName lastName');
+      .populate({ path: 'employee', select: 'firstName lastName email', match: { status: 'Active' } })
+      .populate({ path: 'approvedBy', select: 'firstName lastName', match: { status: 'Active' } })
+      .populate({ path: 'rejectedBy', select: 'firstName lastName', match: { status: 'Active' } });
 
     // Emit to all connected clients for live updates
     const io = req.app.get('io');
