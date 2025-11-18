@@ -72,11 +72,23 @@ const getMessages = async (req, res) => {
     const messages = await Message.find({
       $or: [
         { sender: currentUserId, receiver: userId, deletedForSender: false },
-        { sender: userId, receiver: currentUserId, deletedForReceiver: false }
+        { sender: userId, receiver: currentUserId, deletedForReceiver: false },
+        { sender: currentUserId, receiver: userId, isDeletedForEveryone: true },
+        { sender: userId, receiver: currentUserId, isDeletedForEveryone: true }
       ]
     }).populate('sender', 'firstName lastName photo').sort({ createdAt: 1 });
 
-    res.json({ messages });
+    // Modify messages that are deleted for everyone to show placeholder content
+    const modifiedMessages = messages.map(msg => {
+      const msgObj = msg.toObject();
+      if (msgObj.isDeletedForEveryone) {
+        msgObj.message = 'Deleted by user';
+        msgObj.file = null; // Remove file attachment for deleted messages
+      }
+      return msgObj;
+    });
+
+    res.json({ messages: modifiedMessages });
   } catch (error) {
     console.error('Error fetching messages:', error);
     res.status(500).json({ message: 'Server error' });
@@ -177,15 +189,14 @@ const deleteForEveryone = async (req, res) => {
       return res.status(403).json({ message: 'You can only delete your own messages' });
     }
 
-    message.deletedForSender = true;
-    message.deletedForReceiver = true;
+    message.isDeletedForEveryone = true;
     await message.save();
 
     // Emit to receiver via socket
     const io = req.app.get('io');
     io.to(message.receiver.toString()).emit('messageDeleted', {
       messageId: messageId,
-      deletedForEveryone: true
+      isDeletedForEveryone: true
     });
 
     res.json({ message: 'Message deleted for everyone' });

@@ -15,6 +15,7 @@ const messageSchema = new mongoose.Schema({
   file: fileSchema,
   deletedForSender: { type: Boolean, default: false },
   deletedForReceiver: { type: Boolean, default: false },
+  isDeletedForEveryone: { type: Boolean, default: false },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Message', messageSchema);
