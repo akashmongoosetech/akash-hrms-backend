@@ -149,7 +149,7 @@ const markAsRead = async (req, res) => {
   }
 };
 
-// Delete message for sender only
+// Delete message for current user only (from their chat feed)
 const deleteForMe = async (req, res) => {
   try {
     const { messageId } = req.params;
@@ -160,14 +160,24 @@ const deleteForMe = async (req, res) => {
       return res.status(404).json({ message: 'Message not found' });
     }
 
-    if (message.sender.toString() !== currentUserId.toString()) {
-      return res.status(403).json({ message: 'You can only delete your own messages' });
+    // Check if current user is either sender or receiver of the message
+    const isSender = message.sender.toString() === currentUserId.toString();
+    const isReceiver = message.receiver.toString() === currentUserId.toString();
+
+    if (!isSender && !isReceiver) {
+      return res.status(403).json({ message: 'You are not authorized to delete this message' });
     }
 
-    message.deletedForSender = true;
+    // Mark as deleted for the current user
+    if (isSender) {
+      message.deletedForSender = true;
+    } else if (isReceiver) {
+      message.deletedForReceiver = true;
+    }
+
     await message.save();
 
-    res.json({ message: 'Message deleted for you' });
+    res.json({ message: 'Message deleted from your chat feed' });
   } catch (error) {
     console.error('Error deleting message for me:', error);
     res.status(500).json({ message: 'Server error' });
