@@ -22,4 +22,10 @@ router.put('/read/:userId', authenticate, authorizeRoles('Employee'), chatContro
 // Search users for starting new chats - Employee and above
 router.get('/search-users', authenticate, authorizeRoles('Employee'), chatController.searchUsers);
 
+// Delete message for me - Employee and above
+router.delete('/delete-for-me/:messageId', authenticate, authorizeRoles('Employee'), chatController.deleteForMe);
+
+// Delete message for everyone - Employee and above
+router.delete('/delete-for-everyone/:messageId', authenticate, authorizeRoles('Employee'), chatController.deleteForEveryone);
+
 module.exports = router;

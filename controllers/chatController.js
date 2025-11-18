@@ -71,8 +71,8 @@ const getMessages = async (req, res) => {
 
     const messages = await Message.find({
       $or: [
-        { sender: currentUserId, receiver: userId },
-        { sender: userId, receiver: currentUserId }
+        { sender: currentUserId, receiver: userId, deletedForSender: false },
+        { sender: userId, receiver: currentUserId, deletedForReceiver: false }
       ]
     }).populate('sender', 'firstName lastName photo').sort({ createdAt: 1 });
 
@@ -137,6 +137,64 @@ const markAsRead = async (req, res) => {
   }
 };
 
+// Delete message for sender only
+const deleteForMe = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const currentUserId = req.user._id;
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ message: 'Message not found' });
+    }
+
+    if (message.sender.toString() !== currentUserId.toString()) {
+      return res.status(403).json({ message: 'You can only delete your own messages' });
+    }
+
+    message.deletedForSender = true;
+    await message.save();
+
+    res.json({ message: 'Message deleted for you' });
+  } catch (error) {
+    console.error('Error deleting message for me:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Delete message for everyone
+const deleteForEveryone = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const currentUserId = req.user._id;
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ message: 'Message not found' });
+    }
+
+    if (message.sender.toString() !== currentUserId.toString()) {
+      return res.status(403).json({ message: 'You can only delete your own messages' });
+    }
+
+    message.deletedForSender = true;
+    message.deletedForReceiver = true;
+    await message.save();
+
+    // Emit to receiver via socket
+    const io = req.app.get('io');
+    io.to(message.receiver.toString()).emit('messageDeleted', {
+      messageId: messageId,
+      deletedForEveryone: true
+    });
+
+    res.json({ message: 'Message deleted for everyone' });
+  } catch (error) {
+    console.error('Error deleting message for everyone:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 const searchUsers = async (req, res) => {
   try {
     const { query } = req.query;
@@ -167,4 +225,4 @@ const searchUsers = async (req, res) => {
   }
 };
 
-module.exports = { sendMessage, getMessages, getChatUsers, markAsRead, searchUsers };
+module.exports = { sendMessage, getMessages, getChatUsers, markAsRead, searchUsers, deleteForMe, deleteForEveryone };

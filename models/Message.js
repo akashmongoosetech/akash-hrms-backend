@@ -13,6 +13,8 @@ const messageSchema = new mongoose.Schema({
   message: { type: String },
   read: { type: Boolean, default: false },
   file: fileSchema,
+  deletedForSender: { type: Boolean, default: false },
+  deletedForReceiver: { type: Boolean, default: false },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Message', messageSchema);
