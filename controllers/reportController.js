@@ -47,7 +47,7 @@ const createReport = async (req, res) => {
     await newReport.save();
 
     // Populate the report for socket emission
-    const populatedReport = await Report.findById(newReport._id).populate('employee', 'firstName lastName email photo');
+    const populatedReport = await Report.findById(newReport._id).populate({ path: 'employee', select: 'firstName lastName email photo', match: { status: 'Active' } });
 
     // Emit socket event for real-time updates
     const io = req.app.get('io');
@@ -90,7 +90,7 @@ const getReports = async (req, res) => {
 
     const totalReports = await Report.countDocuments(query);
     const reports = await Report.find(query)
-      .populate('employee', 'firstName lastName email photo')
+      .populate({ path: 'employee', select: 'firstName lastName email photo', match: { status: 'Active' } })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
@@ -113,7 +113,7 @@ const getReports = async (req, res) => {
 const getReportById = async (req, res) => {
   try {
     const { id } = req.params;
-    const report = await Report.findById(id).populate('employee', 'firstName lastName email photo');
+    const report = await Report.findById(id).populate({ path: 'employee', select: 'firstName lastName email photo', match: { status: 'Active' } });
 
     if (!report) {
       return res.status(404).json({ message: 'Report not found' });
@@ -147,7 +147,7 @@ const updateReport = async (req, res) => {
     }
 
     const updatedReport = await Report.findByIdAndUpdate(id, updates, { new: true })
-      .populate('employee', 'firstName lastName email photo');
+      .populate({ path: 'employee', select: 'firstName lastName email photo', match: { status: 'Active' } });
 
     // Emit socket event for real-time updates
     const io = req.app.get('io');

@@ -4,8 +4,8 @@ const Team = require('../models/Team');
 const getTeams = async (req, res) => {
   try {
     const teams = await Team.find()
-      .populate('manager', 'firstName lastName email photo')
-      .populate('teamMembers', 'firstName lastName email photo')
+      .populate({ path: 'manager', select: 'firstName lastName email photo', match: { status: 'Active' } })
+      .populate({ path: 'teamMembers', select: 'firstName lastName email photo', match: { status: 'Active' } })
       .populate({
         path: 'project',
         populate: {
@@ -48,8 +48,8 @@ const createTeam = async (req, res) => {
     await team.save();
 
     const populatedTeam = await Team.findById(team._id)
-      .populate('manager', 'firstName lastName email photo')
-      .populate('teamMembers', 'firstName lastName email photo')
+      .populate({ path: 'manager', select: 'firstName lastName email photo', match: { status: 'Active' } })
+      .populate({ path: 'teamMembers', select: 'firstName lastName email photo', match: { status: 'Active' } })
       .populate({
         path: 'project',
         populate: {

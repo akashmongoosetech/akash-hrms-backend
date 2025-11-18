@@ -47,7 +47,7 @@ const sendMessage = async (req, res) => {
     const io = req.app.get('io');
     io.to(receiverId.toString()).emit('newMessage', {
       _id: newMessage._id.toString(),
-      sender: { _id: senderId.toString(), firstName: req.user.firstName, lastName: req.user.lastName },
+      sender: { _id: senderId.toString(), firstName: req.user.firstName, lastName: req.user.lastName, photo: req.user.photo },
       receiver: receiverId.toString(),
       message: trimmedMessage,
       file: messageData.file,
@@ -74,7 +74,7 @@ const getMessages = async (req, res) => {
         { sender: currentUserId, receiver: userId },
         { sender: userId, receiver: currentUserId }
       ]
-    }).populate('sender', 'firstName lastName').sort({ createdAt: 1 });
+    }).populate('sender', 'firstName lastName photo').sort({ createdAt: 1 });
 
     res.json({ messages });
   } catch (error) {
@@ -93,7 +93,7 @@ const getChatUsers = async (req, res) => {
         { sender: currentUserId },
         { receiver: currentUserId }
       ]
-    }).populate('sender', 'firstName lastName email').populate('receiver', 'firstName lastName email').sort({ createdAt: -1 });
+    }).populate('sender', 'firstName lastName email photo').populate('receiver', 'firstName lastName email photo').sort({ createdAt: -1 });
 
     const chatUsers = new Map();
 
@@ -105,6 +105,7 @@ const getChatUsers = async (req, res) => {
           firstName: otherUser.firstName,
           lastName: otherUser.lastName,
           email: otherUser.email,
+          photo: otherUser.photo,
           lastMessage: msg.message,
           lastMessageTime: msg.createdAt,
         });
@@ -157,7 +158,7 @@ const searchUsers = async (req, res) => {
           ]
         }
       ]
-    }).select('firstName lastName email role').limit(20);
+    }).select('firstName lastName email role photo').limit(20);
 
     res.json({ users });
   } catch (error) {

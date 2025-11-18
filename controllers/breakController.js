@@ -131,7 +131,7 @@ const getBreaks = async (req, res) => {
 
 const getEmployees = async (req, res) => {
   try {
-    const employees = await User.find({ role: 'Employee' }, 'firstName lastName _id');
+    const employees = await User.find({ role: 'Employee', status: 'Active' }, 'firstName lastName _id');
     res.json(employees);
   } catch (err) {
     console.error(err);

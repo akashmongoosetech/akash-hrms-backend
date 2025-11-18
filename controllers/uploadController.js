@@ -77,7 +77,7 @@ const getGalleryPictures = async (req, res) => {
 // Get all users' gallery pictures (for admins)
 const getAllGalleryPictures = async (req, res) => {
   try {
-    const users = await User.find({ status: { $ne: 'Deleted' } })
+    const users = await User.find({ status: 'Active' })
       .select('profilePictures firstName lastName _id')
       .sort({ createdAt: -1 });
 

@@ -118,8 +118,16 @@ const getUsers = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    const totalUsers = await User.countDocuments({ status: { $ne: 'Deleted' } });
-    const users = await User.find({ status: { $ne: 'Deleted' } }, '-password').populate('department').sort({ createdAt: -1 }).skip(skip).limit(limit);
+    let query = { status: { $ne: 'Deleted' } };
+    if (req.query.role) {
+      query.role = req.query.role;
+    }
+    if (req.query.status) {
+      query.status = req.query.status;
+    }
+
+    const totalUsers = await User.countDocuments(query);
+    const users = await User.find(query, '-password').populate('department').sort({ createdAt: -1 }).skip(skip).limit(limit);
 
     res.json({
       users,

@@ -17,7 +17,7 @@ const getProjects = async (req, res) => {
     const totalProjects = await Project.countDocuments(query);
     const projects = await Project.find(query)
       .populate('client', 'name email profile status')
-      .populate('teamMembers', 'firstName lastName email photo')
+      .populate({ path: 'teamMembers', select: 'firstName lastName email photo', match: { status: 'Active' } })
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
@@ -41,7 +41,7 @@ const getProjectById = async (req, res) => {
   try {
     const project = await Project.findById(req.params.id)
       .populate('client', 'name email profile status')
-      .populate('teamMembers', 'firstName lastName email photo');
+      .populate({ path: 'teamMembers', select: 'firstName lastName email photo', match: { status: 'Active' } });
     if (!project) return res.status(404).json({ message: 'Project not found' });
     res.json(project);
   } catch (err) {
@@ -73,7 +73,7 @@ const createProject = async (req, res) => {
 
     const populatedProject = await Project.findById(project._id)
       .populate('client', 'name email profile status')
-      .populate('teamMembers', 'firstName lastName email photo');
+      .populate({ path: 'teamMembers', select: 'firstName lastName email photo', match: { status: 'Active' } });
 
     // Get all employees to send push notifications
     const employees = await User.find({ role: 'Employee' });
@@ -136,7 +136,7 @@ const updateProject = async (req, res) => {
 
     const project = await Project.findByIdAndUpdate(id, updates, { new: true, runValidators: true })
       .populate('client', 'name email profile status')
-      .populate('teamMembers', 'firstName lastName email photo');
+      .populate({ path: 'teamMembers', select: 'firstName lastName email photo', match: { status: 'Active' } });
     if (!project) return res.status(404).json({ message: 'Project not found' });
 
     // Get all employees to send push notifications
