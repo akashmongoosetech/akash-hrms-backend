@@ -8,9 +8,8 @@ const uploadImage = (req, res) => {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    // Return the URL of the uploaded image
-    const imageUrl = `${req.protocol}://${req.get('host')}/api/uploads/${req.file.filename}`;
-    res.json({ url: imageUrl });
+    // Return the Cloudinary URL of the uploaded image
+    res.json({ url: req.file.path });
   } catch (error) {
     console.error('Error uploading image:', error);
     res.status(500).json({ error: 'Server error' });
@@ -36,7 +35,8 @@ const uploadProfilePicture = async (req, res) => {
       return res.status(403).json({ error: 'Forbidden: insufficient permissions' });
     }
 
-    const imageUrl = `${req.protocol}://${req.get('host')}/api/uploads/${req.file.filename}`;
+    // Use Cloudinary URL
+    const imageUrl = req.file.path;
 
     // Add to profilePictures array
     user.profilePictures.push(imageUrl);
@@ -53,7 +53,7 @@ const uploadProfilePicture = async (req, res) => {
 const getGalleryPictures = async (req, res) => {
   try {
     const userId = req.params.userId || req.user._id;
-    const user = await User.findById(userId).select('profilePictures firstName lastName');
+    const user = await User.findById(userId).select('profilePictures firstName lastName photo');
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -65,7 +65,7 @@ const getGalleryPictures = async (req, res) => {
     }
 
     res.json({
-      user: { _id: user._id, firstName: user.firstName, lastName: user.lastName },
+      user: { _id: user._id, firstName: user.firstName, lastName: user.lastName, photo: user.photo },
       pictures: user.profilePictures
     });
   } catch (error) {
@@ -78,11 +78,11 @@ const getGalleryPictures = async (req, res) => {
 const getAllGalleryPictures = async (req, res) => {
   try {
     const users = await User.find({ status: 'Active' })
-      .select('profilePictures firstName lastName _id')
+      .select('profilePictures firstName lastName _id photo')
       .sort({ createdAt: -1 });
 
     const gallery = users.map(user => ({
-      user: { _id: user._id, firstName: user.firstName, lastName: user.lastName },
+      user: { _id: user._id, firstName: user.firstName, lastName: user.lastName, photo: user.photo },
       pictures: user.profilePictures
     }));
 
