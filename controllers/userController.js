@@ -120,7 +120,13 @@ const getUsers = async (req, res) => {
 
     let query = { status: { $ne: 'Deleted' } };
     if (req.query.role) {
-      query.role = req.query.role;
+      // Handle comma-separated roles
+      const roles = req.query.role.split(',').map(role => role.trim());
+      if (roles.length > 1) {
+        query.role = { $in: roles };
+      } else {
+        query.role = req.query.role;
+      }
     }
     if (req.query.status) {
       query.status = req.query.status;

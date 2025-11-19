@@ -69,6 +69,8 @@ app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/payments', require('./routes/payments'));
 app.use('/api/blogs', require('./routes/blogs'));
 app.use('/api/expenses', require('./routes/expenses'));
+app.use('/api/categories', require('./routes/categories'));
+app.use('/api/courses', require('./routes/courses'));
 app.use('/api/chats', require('./routes/chats'));
 
 // example protected route
