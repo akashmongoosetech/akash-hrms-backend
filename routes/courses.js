@@ -29,4 +29,8 @@ router.delete('/:id', authenticate, authorizeRoles('SuperAdmin'), courseControll
 router.post('/:id/enroll', authenticate, authorizeRoles('Employee'), courseController.enrollInCourse);
 router.post('/:id/unenroll', authenticate, authorizeRoles('Employee'), courseController.unenrollFromCourse);
 
+// Progress routes - Employee and above
+router.get('/:id/progress', authenticate, authorizeRoles('Employee'), courseController.getCourseProgress);
+router.put('/:id/progress', authenticate, authorizeRoles('Employee'), courseController.updateCourseProgress);
+
 module.exports = router;

@@ -1,6 +1,7 @@
 const Course = require('../models/Course');
 const Category = require('../models/Category');
 const User = require('../models/User');
+const CourseProgress = require('../models/CourseProgress');
 
 const getCourses = async (req, res) => {
   try {
@@ -243,6 +244,72 @@ const unenrollFromCourse = async (req, res) => {
   }
 };
 
+const getCourseProgress = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user._id;
+
+    const progress = await CourseProgress.findOne({ user: userId, course: id })
+      .populate('courseDetails', 'title duration')
+      .populate('userDetails', 'firstName lastName');
+
+    if (!progress) {
+      return res.json({
+        progress: 0,
+        watchedTime: 0,
+        totalDuration: 0,
+        completed: false,
+        lastWatchedAt: null
+      });
+    }
+
+    res.json(progress);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+const updateCourseProgress = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user._id;
+    const { watchedTime, totalDuration } = req.body;
+
+    if (watchedTime === undefined || totalDuration === undefined) {
+      return res.status(400).json({ message: 'watchedTime and totalDuration are required' });
+    }
+
+    // Calculate progress percentage
+    const progress = totalDuration > 0 ? Math.min((watchedTime / totalDuration) * 100, 100) : 0;
+    const completed = progress >= 100;
+
+    const updatedProgress = await CourseProgress.findOneAndUpdate(
+      { user: userId, course: id },
+      {
+        watchedTime,
+        totalDuration,
+        progress,
+        completed,
+        lastWatchedAt: new Date()
+      },
+      {
+        new: true,
+        upsert: true,
+        runValidators: true
+      }
+    ).populate('courseDetails', 'title duration');
+
+    res.json({
+      message: 'Progress updated successfully',
+      progress: updatedProgress
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+};
+
 module.exports = {
   getCourses,
   getCourseById,
@@ -250,5 +317,7 @@ module.exports = {
   updateCourse,
   deleteCourse,
   enrollInCourse,
-  unenrollFromCourse
+  unenrollFromCourse,
+  getCourseProgress,
+  updateCourseProgress
 };
