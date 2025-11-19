@@ -7,7 +7,37 @@ const getDepartments = async (req, res) => {
     const skip = (page - 1) * limit;
 
     const totalDepartments = await Department.countDocuments();
-    const departments = await Department.find().sort({ createdAt: -1 }).skip(skip).limit(limit);
+
+    // Get departments with employee count
+    const departments = await Department.aggregate([
+      {
+        $lookup: {
+          from: 'users',
+          localField: '_id',
+          foreignField: 'department',
+          as: 'employees'
+        }
+      },
+      {
+        $addFields: {
+          totalAssociateEmployee: { $size: '$employees' }
+        }
+      },
+      {
+        $project: {
+          employees: 0 // Exclude the employees array from the result
+        }
+      },
+      {
+        $sort: { createdAt: -1 }
+      },
+      {
+        $skip: skip
+      },
+      {
+        $limit: limit
+      }
+    ]);
 
     res.json({
       departments,
