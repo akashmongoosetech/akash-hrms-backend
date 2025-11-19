@@ -6,7 +6,11 @@ const fs = require('fs');
 const http = require('http');
 const socketIo = require('socket.io');
 const webpush = require('web-push');
+const cron = require('node-cron');
 const connectDB = require('./config/db');
+const PunchTime = require('./models/PunchTime');
+const Report = require('./models/Report');
+const User = require('./models/User');
 
 const app = express();
 const server = http.createServer(app);
@@ -95,6 +99,59 @@ io.on('connection', (socket) => {
 
 // Make io accessible to routes
 app.set('io', io);
+
+// Cron job for automatic punch-out at midnight
+cron.schedule('0 0 * * *', async () => {
+  console.log('Running midnight auto-punch-out job');
+
+  try {
+    const now = new Date();
+    const today = now.toISOString().split('T')[0]; // YYYY-MM-DD
+    const midnight = new Date(today + 'T00:00:00.000Z'); // Midnight UTC
+
+    // Find all employees still punched in
+    const punchedInEmployees = await PunchTime.find({ punchOutTime: null });
+
+    for (const punch of punchedInEmployees) {
+      // Auto punch out at midnight
+      punch.punchOutTime = midnight;
+      punch.totalDuration = midnight.getTime() - punch.punchInTime.getTime();
+      await punch.save();
+
+      // Check if report already exists for today
+      const existingReport = await Report.findOne({ employee: punch.employee, date: today });
+      if (!existingReport) {
+        // Create automatic report
+        const startTime = punch.punchInTime.toTimeString().slice(0, 5); // HH:MM
+
+        const newReport = new Report({
+          employee: punch.employee,
+          description: "Your punch-out for today has been automatically recorded by the system due to the absence of a manual punch-out. Please ensure to manually punch out at the end of your day to maintain accurate attendance records.",
+          startTime: startTime,
+          breakDuration: 0,
+          endTime: '00:00',
+          workingHours: '07:00',
+          totalHours: '07:00',
+          date: today,
+        });
+
+        await newReport.save();
+
+        // Emit socket event for real-time updates
+        const populatedReport = await Report.findById(newReport._id).populate({ path: 'employee', select: 'firstName lastName email photo', match: { status: 'Active' } });
+        io.emit('reportCreated', populatedReport);
+      }
+
+      // Emit punch-out event
+      const user = await User.findById(punch.employee);
+      io.emit('punch-out', { employee: user, punchTime: punch });
+    }
+
+    console.log(`Auto-punched out ${punchedInEmployees.length} employees`);
+  } catch (error) {
+    console.error('Error in midnight auto-punch-out job:', error);
+  }
+});
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`Server running on port ${PORT}`));

@@ -13,8 +13,7 @@ const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
     folder: 'hrms-uploads',
-    allowed_formats: ['jpg', 'jpeg', 'png', 'gif', 'pdf', 'doc', 'docx'],
-    transformation: [{ width: 1000, height: 1000, crop: 'limit' }],
+    resource_type: 'auto',
   },
 });
 

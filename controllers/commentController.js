@@ -23,6 +23,10 @@ const createComment = async (req, res) => {
     const { message } = req.body;
     const userId = req.user._id;
 
+    console.log('Creating comment for ticket:', ticketId);
+    console.log('Message:', message);
+    console.log('Files:', req.files);
+
     if (!message || !message.trim()) {
       return res.status(400).json({ message: 'Message is required' });
     }
@@ -33,6 +37,8 @@ const createComment = async (req, res) => {
       mimetype: file.mimetype,
       size: file.size
     })) : [];
+
+    console.log('Attachments:', attachments);
 
     const comment = new Comment({
       ticket: ticketId,
@@ -50,7 +56,7 @@ const createComment = async (req, res) => {
 
     res.status(201).json(comment);
   } catch (error) {
-    console.error('Error creating comment:', error.message);
+    console.error('Error creating comment:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };
