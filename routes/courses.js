@@ -33,4 +33,7 @@ router.post('/:id/unenroll', authenticate, authorizeRoles('Employee'), courseCon
 router.get('/:id/progress', authenticate, authorizeRoles('Employee'), courseController.getCourseProgress);
 router.put('/:id/progress', authenticate, authorizeRoles('Employee'), courseController.updateCourseProgress);
 
+// Certificate route - Employee and above
+router.get('/:id/certificate', authenticate, authorizeRoles('Employee'), courseController.generateCertificate);
+
 module.exports = router;
