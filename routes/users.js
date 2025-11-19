@@ -13,6 +13,9 @@ const cpUpload = upload.fields([
   { name: 'resume', maxCount: 1 },
 ]);
 
+// Get current user
+router.get('/me', authenticate, userController.getCurrentUser);
+
 // Get all users - Employee and above
 router.get('/', authenticate, authorizeRoles('Employee'), userController.getUsers);
 
