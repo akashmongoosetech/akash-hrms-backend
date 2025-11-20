@@ -1,7 +1,7 @@
 const Course = require('../models/Course');
 const Category = require('../models/Category');
 const User = require('../models/User');
-const CourseProgress = require('../models/CourseProgress');
+const VideoProgress = require('../models/VideoProgress');
 const CourseNotes = require('../models/CourseNotes');
 const PDFDocument = require('pdfkit');
 
@@ -92,14 +92,12 @@ const createCourse = async (req, res) => {
       duration,
       status: status || 'Draft',
       category,
-      createdBy
+      createdBy,
+      modules: [] // Initialize empty modules array
     };
 
     // Handle file uploads
     if (req.files) {
-      if (req.files['courseVideo']) {
-        courseData.courseVideo = req.files['courseVideo'][0].path;
-      }
       if (req.files['thumbnailImage']) {
         courseData.thumbnailImage = req.files['thumbnailImage'][0].path;
       }
@@ -157,9 +155,6 @@ const updateCourse = async (req, res) => {
 
     // Handle file uploads
     if (req.files) {
-      if (req.files['courseVideo']) {
-        updateData.courseVideo = req.files['courseVideo'][0].path;
-      }
       if (req.files['thumbnailImage']) {
         updateData.thumbnailImage = req.files['thumbnailImage'][0].path;
       }
@@ -251,30 +246,62 @@ const getCourseProgress = async (req, res) => {
     const { id } = req.params;
     const userId = req.user._id;
 
-    const progress = await CourseProgress.findOne({ user: userId, course: id })
-      .populate('courseDetails', 'title duration')
-      .populate('userDetails', 'firstName lastName');
+    // Get the course to know the total number of videos
+    const course = await Course.findById(id);
+    if (!course) return res.status(404).json({ message: 'Course not found' });
 
-    if (!progress) {
+    // Calculate total videos in the course
+    let totalVideos = 0;
+    const videoIds = [];
+    course.modules.forEach(module => {
+      module.videos.forEach(video => {
+        totalVideos++;
+        videoIds.push({ moduleId: module._id.toString(), videoId: video._id.toString() });
+      });
+    });
+
+    if (totalVideos === 0) {
       return res.json({
         progress: 0,
         watchedTime: 0,
         totalDuration: 0,
         completed: false,
-        lastWatchedAt: null
+        lastWatchedAt: null,
+        videoProgress: []
       });
     }
 
-    res.json(progress);
+    // Get all video progress for this course
+    const videoProgresses = await VideoProgress.find({ user: userId, course: id });
+
+    // Calculate overall course progress
+    const completedVideos = videoProgresses.filter(vp => vp.completed).length;
+    const overallProgress = (completedVideos / totalVideos) * 100;
+
+    const totalWatchedTime = videoProgresses.reduce((sum, vp) => sum + vp.watchedTime, 0);
+    const totalDuration = videoProgresses.reduce((sum, vp) => sum + vp.totalDuration, 0);
+
+    const lastWatchedAt = videoProgresses.length > 0
+      ? new Date(Math.max(...videoProgresses.map(vp => new Date(vp.lastWatchedAt).getTime())))
+      : null;
+
+    res.json({
+      progress: Math.round(overallProgress),
+      watchedTime: totalWatchedTime,
+      totalDuration: totalDuration,
+      completed: overallProgress >= 100,
+      lastWatchedAt: lastWatchedAt,
+      videoProgress: videoProgresses
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });
   }
 };
 
-const updateCourseProgress = async (req, res) => {
+const updateVideoProgress = async (req, res) => {
   try {
-    const { id } = req.params;
+    const { id, moduleId, videoId } = req.params;
     const userId = req.user._id;
     const { watchedTime, totalDuration } = req.body;
 
@@ -282,12 +309,12 @@ const updateCourseProgress = async (req, res) => {
       return res.status(400).json({ message: 'watchedTime and totalDuration are required' });
     }
 
-    // Calculate progress percentage
+    // Calculate progress percentage for this video
     const progress = totalDuration > 0 ? Math.min((watchedTime / totalDuration) * 100, 100) : 0;
     const completed = progress >= 100;
 
-    const updatedProgress = await CourseProgress.findOneAndUpdate(
-      { user: userId, course: id },
+    const updatedProgress = await VideoProgress.findOneAndUpdate(
+      { user: userId, course: id, moduleId, videoId },
       {
         watchedTime,
         totalDuration,
@@ -300,10 +327,10 @@ const updateCourseProgress = async (req, res) => {
         upsert: true,
         runValidators: true
       }
-    ).populate('courseDetails', 'title duration');
+    ).populate('courseDetails', 'title');
 
     res.json({
-      message: 'Progress updated successfully',
+      message: 'Video progress updated successfully',
       progress: updatedProgress
     });
   } catch (err) {
@@ -321,12 +348,30 @@ const generateCertificate = async (req, res) => {
     const course = await Course.findById(id);
     if (!course) return res.status(404).json({ message: "Course not found" });
 
-    const progress = await CourseProgress.findOne({ user: userId, course: id });
-    if (!progress || !progress.completed)
-      return res.status(403).json({ message: "Course not completed" });
+    // Check if all videos in the course are completed
+    let totalVideos = 0;
+    course.modules.forEach(module => {
+      totalVideos += module.videos.length;
+    });
+
+    const completedVideos = await VideoProgress.countDocuments({
+      user: userId,
+      course: id,
+      completed: true
+    });
+
+    if (completedVideos < totalVideos) {
+      return res.status(403).json({ message: "Course not completed - all videos must be watched" });
+    }
 
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: "User not found" });
+
+    // Get the latest completion date
+    const latestProgress = await VideoProgress.findOne({ user: userId, course: id, completed: true })
+      .sort({ lastWatchedAt: -1 });
+
+    const completionDate = latestProgress ? latestProgress.lastWatchedAt : new Date();
 
     // ===== PDF SETUP =====
     const doc = new PDFDocument({
@@ -426,10 +471,8 @@ const generateCertificate = async (req, res) => {
       .fontSize(28)
       .font("Helvetica-Bold")
       .text(`"${course.title}"`, 0, 360, { align: "center" });
-    
-    const completionDate = new Date(
-      progress.lastWatchedAt || new Date()
-    ).toLocaleDateString("en-US", {
+
+    const completionDateFormatted = completionDate.toLocaleDateString("en-US", {
       year: "numeric",
       month: "long",
       day: "numeric"
@@ -437,7 +480,7 @@ const generateCertificate = async (req, res) => {
     
     doc.fillColor("#666")
       .fontSize(15)
-      .text(`Completed on: ${completionDate}`, 0, 400, { align: "center" });
+      .text(`Completed on: ${completionDateFormatted}`, 0, 400, { align: "center" });
     
     // Short paragraph (clean centered)
     doc.fillColor("#777")
@@ -656,6 +699,212 @@ const deleteCourseNote = async (req, res) => {
 };
 
 
+// Module management functions
+const addModule = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, description, order } = req.body;
+
+    if (!title) {
+      return res.status(400).json({ message: 'Module title is required' });
+    }
+
+    const course = await Course.findById(id);
+    if (!course) return res.status(404).json({ message: 'Course not found' });
+
+    const moduleOrder = order !== undefined ? order : course.modules.length;
+    const moduleId = `module_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    course.modules.push({
+      title,
+      description: description || '',
+      order: moduleOrder,
+      videos: []
+    });
+
+    await course.save();
+
+    res.json({
+      message: 'Module added successfully',
+      module: course.modules[course.modules.length - 1]
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+};
+
+const updateModule = async (req, res) => {
+  try {
+    const { id, moduleId } = req.params;
+    const { title, description, order } = req.body;
+
+    const course = await Course.findById(id);
+    if (!course) return res.status(404).json({ message: 'Course not found' });
+
+    const module = course.modules.id(moduleId);
+    if (!module) return res.status(404).json({ message: 'Module not found' });
+
+    if (title !== undefined) module.title = title;
+    if (description !== undefined) module.description = description;
+    if (order !== undefined) module.order = order;
+
+    await course.save();
+
+    res.json({
+      message: 'Module updated successfully',
+      module
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+};
+
+const deleteModule = async (req, res) => {
+  try {
+    const { id, moduleId } = req.params;
+
+    const course = await Course.findById(id);
+    if (!course) return res.status(404).json({ message: 'Course not found' });
+
+    course.modules.pull(moduleId);
+    await course.save();
+
+    // Delete all video progress for this module
+    await VideoProgress.deleteMany({ course: id, moduleId });
+
+    res.json({ message: 'Module deleted successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+};
+
+// Video management functions
+const addVideo = async (req, res) => {
+  try {
+    const { id, moduleId } = req.params;
+    const { title, description, order } = req.body;
+
+    if (!title) {
+      return res.status(400).json({ message: 'Video title is required' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ message: 'Video file is required' });
+    }
+
+    const course = await Course.findById(id);
+    if (!course) return res.status(404).json({ message: 'Course not found' });
+
+    const module = course.modules.id(moduleId);
+    if (!module) return res.status(404).json({ message: 'Module not found' });
+
+    const videoOrder = order !== undefined ? order : module.videos.length;
+    const videoId = `video_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    module.videos.push({
+      title,
+      description: description || '',
+      videoFile: req.file.path,
+      order: videoOrder
+    });
+
+    await course.save();
+
+    res.json({
+      message: 'Video added successfully',
+      video: module.videos[module.videos.length - 1]
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+};
+
+const updateVideo = async (req, res) => {
+  try {
+    const { id, moduleId, videoId } = req.params;
+    const { title, description, order } = req.body;
+
+    const course = await Course.findById(id);
+    if (!course) return res.status(404).json({ message: 'Course not found' });
+
+    const module = course.modules.id(moduleId);
+    if (!module) return res.status(404).json({ message: 'Module not found' });
+
+    const video = module.videos.id(videoId);
+    if (!video) return res.status(404).json({ message: 'Video not found' });
+
+    if (title !== undefined) video.title = title;
+    if (description !== undefined) video.description = description;
+    if (order !== undefined) video.order = order;
+
+    // Handle video file upload
+    if (req.file) {
+      video.videoFile = req.file.path;
+    }
+
+    await course.save();
+
+    res.json({
+      message: 'Video updated successfully',
+      video
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+};
+
+const deleteVideo = async (req, res) => {
+  try {
+    const { id, moduleId, videoId } = req.params;
+
+    const course = await Course.findById(id);
+    if (!course) return res.status(404).json({ message: 'Course not found' });
+
+    const module = course.modules.id(moduleId);
+    if (!module) return res.status(404).json({ message: 'Module not found' });
+
+    module.videos.pull(videoId);
+    await course.save();
+
+    // Delete video progress for this video
+    await VideoProgress.deleteMany({ course: id, moduleId, videoId });
+
+    res.json({ message: 'Video deleted successfully' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+};
+
+const getVideoProgress = async (req, res) => {
+  try {
+    const { id, moduleId, videoId } = req.params;
+    const userId = req.user._id;
+
+    const progress = await VideoProgress.findOne({ user: userId, course: id, moduleId, videoId });
+
+    if (!progress) {
+      return res.json({
+        progress: 0,
+        watchedTime: 0,
+        totalDuration: 0,
+        completed: false,
+        lastWatchedAt: null
+      });
+    }
+
+    res.json(progress);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 module.exports = {
   getCourses,
   getCourseById,
@@ -665,10 +914,19 @@ module.exports = {
   enrollInCourse,
   unenrollFromCourse,
   getCourseProgress,
-  updateCourseProgress,
+  updateVideoProgress,
   generateCertificate,
   getCourseNotes,
   addCourseNote,
   updateCourseNote,
-  deleteCourseNote
+  deleteCourseNote,
+  // Module management
+  addModule,
+  updateModule,
+  deleteModule,
+  // Video management
+  addVideo,
+  updateVideo,
+  deleteVideo,
+  getVideoProgress
 };

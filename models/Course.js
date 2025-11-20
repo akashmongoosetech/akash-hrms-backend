@@ -7,11 +7,22 @@ const courseSchema = new mongoose.Schema({
   status: { type: String, enum: ['Published', 'Draft'], default: 'Draft' },
   category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  courseVideo: { type: String }, // File path for video
   thumbnailImage: { type: String }, // File path for thumbnail
   views: { type: Number, default: 0 },
   likes: { type: Number, default: 0 },
   enrolledUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  modules: [{
+    title: { type: String, required: true },
+    description: { type: String },
+    order: { type: Number, default: 0 },
+    videos: [{
+      title: { type: String, required: true },
+      description: { type: String },
+      videoFile: { type: String, required: true }, // File path for video
+      duration: { type: Number }, // Duration in seconds
+      order: { type: Number, default: 0 }
+    }]
+  }],
 }, { timestamps: true });
 
 // Virtual for category details
