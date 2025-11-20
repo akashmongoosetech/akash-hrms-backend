@@ -36,4 +36,10 @@ router.put('/:id/progress', authenticate, authorizeRoles('Employee'), courseCont
 // Certificate route - Employee and above
 router.get('/:id/certificate', authenticate, authorizeRoles('Employee'), courseController.generateCertificate);
 
+// Notes routes - Employee and above
+router.get('/:id/notes', authenticate, authorizeRoles('Employee'), courseController.getCourseNotes);
+router.post('/:id/notes', authenticate, authorizeRoles('Employee'), courseController.addCourseNote);
+router.put('/:id/notes/:noteId', authenticate, authorizeRoles('Employee'), courseController.updateCourseNote);
+router.delete('/:id/notes/:noteId', authenticate, authorizeRoles('Employee'), courseController.deleteCourseNote);
+
 module.exports = router;

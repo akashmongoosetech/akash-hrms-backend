@@ -8,8 +8,17 @@ const uploadImage = (req, res) => {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    // Return the Cloudinary URL of the uploaded image
-    res.json({ url: req.file.path });
+    // For CKEditor, return the URL that can be accessed
+    let imageUrl = req.file.path;
+
+    // If it's a local file (not Cloudinary), construct the full URL
+    if (!imageUrl.startsWith('http')) {
+      const baseUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const apiUrl = process.env.FRONTEND_URL ? process.env.FRONTEND_URL.replace('5173', '5000') : 'http://localhost:5000';
+      imageUrl = `${apiUrl}/api/uploads/${imageUrl}`;
+    }
+
+    res.json({ url: imageUrl });
   } catch (error) {
     console.error('Error uploading image:', error);
     res.status(500).json({ error: 'Server error' });

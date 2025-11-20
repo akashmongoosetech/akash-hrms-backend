@@ -2,6 +2,7 @@ const Course = require('../models/Course');
 const Category = require('../models/Category');
 const User = require('../models/User');
 const CourseProgress = require('../models/CourseProgress');
+const CourseNotes = require('../models/CourseNotes');
 const PDFDocument = require('pdfkit');
 
 const getCourses = async (req, res) => {
@@ -533,6 +534,127 @@ doc.fillColor("#999")
   }
 };
 
+const getCourseNotes = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user._id;
+
+    const courseNotes = await CourseNotes.findOne({ user: userId, course: id })
+      .populate('courseDetails', 'title')
+      .populate('userDetails', 'firstName lastName');
+
+    if (!courseNotes) {
+      return res.json({ notes: [] });
+    }
+
+    res.json(courseNotes);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+const addCourseNote = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user._id;
+    const { content } = req.body;
+
+    if (!content || !content.trim()) {
+      return res.status(400).json({ message: 'Note content is required' });
+    }
+
+    const updatedNotes = await CourseNotes.findOneAndUpdate(
+      { user: userId, course: id },
+      {
+        $push: {
+          notes: {
+            content: content.trim(),
+            createdAt: new Date()
+          }
+        }
+      },
+      {
+        new: true,
+        upsert: true,
+        runValidators: true
+      }
+    ).populate('courseDetails', 'title');
+
+    res.json({
+      message: 'Note added successfully',
+      notes: updatedNotes
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+};
+
+const updateCourseNote = async (req, res) => {
+  try {
+    const { id, noteId } = req.params;
+    const userId = req.user._id;
+    const { content } = req.body;
+
+    if (!content || !content.trim()) {
+      return res.status(400).json({ message: 'Note content is required' });
+    }
+
+    const updatedNotes = await CourseNotes.findOneAndUpdate(
+      { user: userId, course: id, 'notes._id': noteId },
+      {
+        $set: {
+          'notes.$.content': content.trim(),
+          'notes.$.createdAt': new Date()
+        }
+      },
+      { new: true, runValidators: true }
+    ).populate('courseDetails', 'title');
+
+    if (!updatedNotes) {
+      return res.status(404).json({ message: 'Note not found' });
+    }
+
+    res.json({
+      message: 'Note updated successfully',
+      notes: updatedNotes
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+};
+
+const deleteCourseNote = async (req, res) => {
+  try {
+    const { id, noteId } = req.params;
+    const userId = req.user._id;
+
+    const updatedNotes = await CourseNotes.findOneAndUpdate(
+      { user: userId, course: id },
+      {
+        $pull: {
+          notes: { _id: noteId }
+        }
+      },
+      { new: true }
+    );
+
+    if (!updatedNotes) {
+      return res.status(404).json({ message: 'Course notes not found' });
+    }
+
+    res.json({
+      message: 'Note deleted successfully',
+      notes: updatedNotes
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+};
+
 
 module.exports = {
   getCourses,
@@ -544,5 +666,9 @@ module.exports = {
   unenrollFromCourse,
   getCourseProgress,
   updateCourseProgress,
-  generateCertificate
+  generateCertificate,
+  getCourseNotes,
+  addCourseNote,
+  updateCourseNote,
+  deleteCourseNote
 };
