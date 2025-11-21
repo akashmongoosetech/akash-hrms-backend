@@ -110,6 +110,17 @@ const getLeaves = async (req, res) => {
       query.employee = req.user._id;
     }
 
+    // Add filters
+    if (req.query.employee && req.user.role !== 'Employee') {
+      query.employee = req.query.employee;
+    }
+    if (req.query.fromDate) {
+      query.startDate = { $gte: new Date(req.query.fromDate) };
+    }
+    if (req.query.toDate) {
+      query.endDate = { $lte: new Date(req.query.toDate) };
+    }
+
     const totalLeaves = await Leave.countDocuments(query);
     const leaves = await Leave.find(query)
       .populate({ path: 'employee', select: 'firstName lastName email photo' })
@@ -121,12 +132,8 @@ const getLeaves = async (req, res) => {
 
     res.json({
       leaves,
-      pagination: {
-        currentPage: page,
-        totalPages: Math.ceil(totalLeaves / limit),
-        totalItems: totalLeaves,
-        itemsPerPage: limit
-      }
+      totalPages: Math.ceil(totalLeaves / limit),
+      totalItems: totalLeaves
     });
   } catch (err) {
     console.error(err);
