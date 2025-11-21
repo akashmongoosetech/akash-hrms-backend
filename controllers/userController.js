@@ -239,6 +239,24 @@ const updateUser = async (req, res) => {
       delete updates.password; // Don't update if empty
     }
 
+    // Handle employeeCode: generate if not provided and user doesn't have one
+    if (!updates.employeeCode || updates.employeeCode.trim() === '') {
+      const existingUser = await User.findById(id);
+      if (!existingUser.employeeCode) {
+        // Generate new employee code
+        const lastUser = await User.findOne({ employeeCode: { $regex: /^SOEM/ } }).sort({ employeeCode: -1 });
+        let nextNumber = 1;
+        if (lastUser && lastUser.employeeCode) {
+          const lastNumber = parseInt(lastUser.employeeCode.replace('SOEM', ''));
+          nextNumber = lastNumber + 1;
+        }
+        updates.employeeCode = `SOEM${nextNumber.toString().padStart(3, '0')}`;
+      } else {
+        // Keep existing code
+        delete updates.employeeCode;
+      }
+    }
+
     // Role hierarchy check: only SuperAdmin can assign SuperAdmin role
     if (updates.role && updates.role === 'SuperAdmin' && req.user.role !== 'SuperAdmin') {
       return res.status(403).json({ message: 'Only SuperAdmin can assign SuperAdmin role' });
@@ -323,14 +341,17 @@ const createUser = async (req, res) => {
     const existing = await User.findOne({ email });
     if (existing) return res.status(409).json({ message: 'Email already registered' });
 
-    // Generate employee code
-    const lastUser = await User.findOne({ employeeCode: { $regex: /^SOEM/ } }).sort({ employeeCode: -1 });
-    let nextNumber = 1;
-    if (lastUser && lastUser.employeeCode) {
-      const lastNumber = parseInt(lastUser.employeeCode.replace('SOEM', ''));
-      nextNumber = lastNumber + 1;
+    // Generate employee code if not provided
+    let employeeCode = req.body.employeeCode;
+    if (!employeeCode || employeeCode.trim() === '') {
+      const lastUser = await User.findOne({ employeeCode: { $regex: /^SOEM/ } }).sort({ employeeCode: -1 });
+      let nextNumber = 1;
+      if (lastUser && lastUser.employeeCode) {
+        const lastNumber = parseInt(lastUser.employeeCode.replace('SOEM', ''));
+        nextNumber = lastNumber + 1;
+      }
+      employeeCode = `SOEM${nextNumber.toString().padStart(3, '0')}`;
     }
-    const employeeCode = `SOEM${nextNumber.toString().padStart(3, '0')}`;
 
     // Role assignment restrictions
     let assignedRole = 'Employee';
