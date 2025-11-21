@@ -7,6 +7,7 @@ const salarySchema = new mongoose.Schema({
 });
 
 const userSchema = new mongoose.Schema({
+  employeeCode: { type: String, unique: true },
   firstName: { type: String, required: true },
   lastName: { type: String, required: true },
   email: { type: String, required: true, unique: true, lowercase: true },

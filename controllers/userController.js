@@ -47,6 +47,7 @@ const sendWelcomeEmail = async (user) => {
               <!-- Account Details Card -->
               <div style="background-color: #f8fafc; border-left: 5px solid #007bff; padding: 20px; border-radius: 6px; margin: 25px 0;">
                 <h3 style="margin-top: 0; color: #007bff;">📋 Your Account Details</h3>
+                <p style="margin: 5px 0;"><strong>Employee Code:</strong> ${user.employeeCode}</p>
                 <p style="margin: 5px 0;"><strong>Email:</strong> ${user.email}</p>
                 <p style="margin: 5px 0;"><strong>Role:</strong> ${user.role}</p>
                 <p style="margin: 5px 0;"><strong>Joining Date:</strong> ${user.joiningDate ? new Date(user.joiningDate).toLocaleDateString() : 'Not specified'}</p>
@@ -322,6 +323,15 @@ const createUser = async (req, res) => {
     const existing = await User.findOne({ email });
     if (existing) return res.status(409).json({ message: 'Email already registered' });
 
+    // Generate employee code
+    const lastUser = await User.findOne({ employeeCode: { $regex: /^SOEM/ } }).sort({ employeeCode: -1 });
+    let nextNumber = 1;
+    if (lastUser && lastUser.employeeCode) {
+      const lastNumber = parseInt(lastUser.employeeCode.replace('SOEM', ''));
+      nextNumber = lastNumber + 1;
+    }
+    const employeeCode = `SOEM${nextNumber.toString().padStart(3, '0')}`;
+
     // Role assignment restrictions
     let assignedRole = 'Employee';
     if (role) {
@@ -337,6 +347,7 @@ const createUser = async (req, res) => {
     const hashed = await bcrypt.hash(password, 10);
 
     const userData = {
+      employeeCode,
       firstName, lastName, email, gender, dob, joiningDate,
       mobile1, mobile2, password: hashed, address1, address2,
       emergencyContact1, emergencyContact2, emergencyContact3,
