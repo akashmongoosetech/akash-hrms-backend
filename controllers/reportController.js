@@ -3,7 +3,7 @@ const User = require('../models/User');
 
 const createReport = async (req, res) => {
   try {
-    const { description, startTime, breakDuration, endTime, workingHours, totalHours } = req.body;
+    const { description, startTime, breakDuration, endTime, workingHours, totalHours, note } = req.body;
     const employee = req.user._id;
     const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
 
@@ -42,6 +42,7 @@ const createReport = async (req, res) => {
       workingHours,
       totalHours,
       date,
+      note: note || '',
     });
 
     await newReport.save();

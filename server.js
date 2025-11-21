@@ -125,16 +125,18 @@ cron.schedule('0 0 * * *', async () => {
       if (!existingReport) {
         // Create automatic report
         const startTime = punch.punchInTime.toTimeString().slice(0, 5); // HH:MM
+        const endTime = midnight.toTimeString().slice(0, 5); // HH:MM (00:00)
 
         const newReport = new Report({
           employee: punch.employee,
           description: "Your punch-out for today has been automatically recorded by the system due to the absence of a manual punch-out. Please ensure to manually punch out at the end of your day to maintain accurate attendance records.",
           startTime: startTime,
           breakDuration: 0,
-          endTime: '00:00',
+          endTime: endTime,
           workingHours: '07:00',
           totalHours: '07:00',
           date: today,
+          note: "Automatic punch-out at midnight due to missing manual punch-out"
         });
 
         await newReport.save();
