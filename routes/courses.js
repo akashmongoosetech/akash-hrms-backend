@@ -37,7 +37,8 @@ router.get('/:id/modules/:moduleId/videos/:videoId/progress', authenticate, auth
 
 // Certificate routes - Employee and above
 router.get('/:id/certificate', authenticate, authorizeRoles('Employee'), courseController.generateCertificate);
-router.post('/verify-certificate', authenticate, authorizeRoles('Admin'), courseController.verifyCertificate);
+router.post('/verify-certificate', courseController.verifyCertificate);
+router.get('/download-certificate/:certificateId', courseController.downloadCertificate);
 
 // Notes routes - Employee and above
 router.get('/:id/notes', authenticate, authorizeRoles('Employee'), courseController.getCourseNotes);
