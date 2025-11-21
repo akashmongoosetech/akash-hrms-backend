@@ -3,6 +3,7 @@ const Category = require('../models/Category');
 const User = require('../models/User');
 const VideoProgress = require('../models/VideoProgress');
 const CourseNotes = require('../models/CourseNotes');
+const CourseProgress = require('../models/CourseProgress');
 const PDFDocument = require('pdfkit');
 
 const getCourses = async (req, res) => {
@@ -373,6 +374,20 @@ const generateCertificate = async (req, res) => {
 
     const completionDate = latestProgress ? latestProgress.lastWatchedAt : new Date();
 
+    // Generate certificate ID
+    const certificateId = `CERT-${Date.now()}-${userId.toString().slice(-6)}`;
+
+    // Store certificate ID in CourseProgress
+    await CourseProgress.findOneAndUpdate(
+      { user: userId, course: id },
+      {
+        certificateId,
+        completed: true,
+        progress: 100
+      },
+      { upsert: true, new: true }
+    );
+
     // ===== PDF SETUP =====
     const doc = new PDFDocument({
       size: "A4",
@@ -550,9 +565,7 @@ const generateCertificate = async (req, res) => {
     // ============================================================
     // FOOTER (MODERN + CLEAN)
     // ============================================================
-    
-  const certificateId = `CERT-${Date.now()}-${userId.toString().slice(-6)}`;
-    
+
     const pageWidth = doc.page.width;
 
 // Left text (fixed x = 40)
@@ -905,6 +918,46 @@ const getVideoProgress = async (req, res) => {
   }
 };
 
+const verifyCertificate = async (req, res) => {
+  try {
+    const { certificateId } = req.body;
+
+    if (!certificateId) {
+      return res.status(400).json({ message: 'Certificate ID is required' });
+    }
+
+    // Find the course progress with this certificate ID
+    const courseProgress = await CourseProgress.findOne({ certificateId })
+      .populate('userDetails', 'firstName lastName email employeeCode photo department joiningDate mobile1 role status')
+      .populate('courseDetails', 'title');
+
+    if (!courseProgress) {
+      return res.status(404).json({ message: 'Certificate not found or invalid' });
+    }
+
+    if (!courseProgress.completed) {
+      return res.status(400).json({ message: 'Certificate is not valid - course not completed' });
+    }
+
+    res.json({
+      valid: true,
+      learner: {
+        firstName: courseProgress.userDetails.firstName,
+        lastName: courseProgress.userDetails.lastName,
+        email: courseProgress.userDetails.email
+      },
+      course: {
+        title: courseProgress.courseDetails.title
+      },
+      certificateId: courseProgress.certificateId,
+      completedAt: courseProgress.updatedAt
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+};
+
 module.exports = {
   getCourses,
   getCourseById,
@@ -916,6 +969,7 @@ module.exports = {
   getCourseProgress,
   updateVideoProgress,
   generateCertificate,
+  verifyCertificate,
   getCourseNotes,
   addCourseNote,
   updateCourseNote,

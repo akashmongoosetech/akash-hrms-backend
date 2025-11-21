@@ -7,6 +7,7 @@ const courseProgressSchema = new mongoose.Schema({
   watchedTime: { type: Number, default: 0 }, // Time watched in seconds
   totalDuration: { type: Number, default: 0 }, // Total video duration in seconds
   completed: { type: Boolean, default: false },
+  certificateId: { type: String, unique: true, sparse: true }, // Certificate ID when course is completed
   lastWatchedAt: { type: Date, default: Date.now },
 }, { timestamps: true });
 

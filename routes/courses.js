@@ -35,8 +35,9 @@ router.get('/:id/progress', authenticate, authorizeRoles('Employee'), courseCont
 router.put('/:id/modules/:moduleId/videos/:videoId/progress', authenticate, authorizeRoles('Employee'), courseController.updateVideoProgress);
 router.get('/:id/modules/:moduleId/videos/:videoId/progress', authenticate, authorizeRoles('Employee'), courseController.getVideoProgress);
 
-// Certificate route - Employee and above
+// Certificate routes - Employee and above
 router.get('/:id/certificate', authenticate, authorizeRoles('Employee'), courseController.generateCertificate);
+router.post('/verify-certificate', authenticate, authorizeRoles('Admin'), courseController.verifyCertificate);
 
 // Notes routes - Employee and above
 router.get('/:id/notes', authenticate, authorizeRoles('Employee'), courseController.getCourseNotes);
