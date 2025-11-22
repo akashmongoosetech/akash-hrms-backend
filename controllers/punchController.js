@@ -99,7 +99,7 @@ const getPunchTimes = async (req, res) => {
 
     const totalPunchTimes = await PunchTime.countDocuments(query);
     const punchTimes = await PunchTime.find(query)
-      .populate('employee', 'firstName lastName email')
+      .populate('employee', 'firstName lastName photo')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
