@@ -5,6 +5,7 @@ const VideoProgress = require('../models/VideoProgress');
 const CourseNotes = require('../models/CourseNotes');
 const CourseProgress = require('../models/CourseProgress');
 const PDFDocument = require('pdfkit');
+const https = require('https');
 
 const getCourses = async (req, res) => {
   try {
@@ -392,25 +393,33 @@ const generatePDFCertificate = (res, user, course, completionDate, certificateId
   doc.quadraticCurveTo(innerX, innerY, innerX + innerRadius, innerY);
   doc.stroke();
 
+  // Add logos
+  if (logo1Buffer) {
+    doc.image(logo1Buffer, 50, 35, { width: 70 });
+  }
+  if (logo2Buffer) {
+    doc.image(logo2Buffer, W - 120, 35, { width: 70 });
+  }
+
   // ============================================================
   // HEADER AREA (UPDATED FONT SIZES)
   // ============================================================
   doc.fillColor("#003E82")
     .fontSize(26)                 // smaller
     .font("Helvetica-Bold")
-    .text("SoSapient Inc.", 0, 45, { align: "center" });
+    .text("SoSapient Inc.", 0, 65, { align: "center" });
 
   doc.fillColor("#003E82")
     .fontSize(45)                 // smaller
     .font("Helvetica-Bold")
-    .text("CERTIFICATE", 0, 90, { align: "center", characterSpacing: 1 });
+    .text("CERTIFICATE", 0, 110, { align: "center", characterSpacing: 1 });
 
   doc.fontSize(24)                // smaller
-  .font("Helvetica-Bold")
-  .text("OF COMPLETION", 0, 140, { align: "center" });
+    .font("Helvetica-Bold")
+    .text("OF COMPLETION", 0, 160, { align: "center" });
 
   // Updated separator position for perfect spacing
-  doc.moveTo(150, 185).lineTo(W - 150, 185).strokeColor("#1C6DD0").lineWidth(2).stroke();
+  doc.moveTo(150, 205).lineTo(W - 150, 205).strokeColor("#1C6DD0").lineWidth(2).stroke();
 
 
   // ============================================================
@@ -419,22 +428,22 @@ const generatePDFCertificate = (res, user, course, completionDate, certificateId
   doc.fillColor("#444")
     .fontSize(20)
     .font("Helvetica")
-    .text("This is to certify that", 0, 235, { align: "center" });
+    .text("This is to certify that", 0, 255, { align: "center" });
 
   doc.fillColor("#003E82")
     .fontSize(40)
     .font("Helvetica-Bold")
-    .text(`${user.firstName} ${user.lastName}`, 0, 275, { align: "center" });
+    .text(`${user.firstName} ${user.lastName}`, 0, 295, { align: "center" });
 
   doc.fillColor("#555")
     .fontSize(18)
     .font("Helvetica")
-    .text("has successfully completed the course", 0, 320, { align: "center" });
+    .text("has successfully completed the course", 0, 340, { align: "center" });
 
   doc.fillColor("#003E82")
     .fontSize(28)
     .font("Helvetica-Bold")
-    .text(`"${course.title}"`, 0, 360, { align: "center" });
+    .text(`"${course.title}"`, 0, 380, { align: "center" });
 
   const completionDateFormatted = completionDate.toLocaleDateString("en-US", {
     year: "numeric",
@@ -444,7 +453,7 @@ const generatePDFCertificate = (res, user, course, completionDate, certificateId
 
   doc.fillColor("#666")
     .fontSize(15)
-    .text(`Completed on: ${completionDateFormatted}`, 0, 400, { align: "center" });
+    .text(`Completed on: ${completionDateFormatted}`, 0, 420, { align: "center" });
 
   // Short paragraph (clean centered)
   doc.fillColor("#777")
@@ -452,7 +461,7 @@ const generatePDFCertificate = (res, user, course, completionDate, certificateId
     .text(
       "This certificate acknowledges the successful completion of the course and recognizes the learner's dedication to personal growth and professional development.",
       120,
-      420,
+      440,
       {
         width: W - 240,
         align: "center",
@@ -571,6 +580,38 @@ const generateCertificate = async (req, res) => {
     // Generate certificate ID
     const certificateId = `CERT-${Date.now()}-${userId.toString().slice(-6)}`;
 
+    // Fetch logos
+    const fetchImage = (url) => {
+      return new Promise((resolve, reject) => {
+        const request = https.get(url, (res) => {
+          if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 303) {
+            // Follow redirect
+            fetchImage(res.headers.location).then(resolve).catch(reject);
+            return;
+          }
+          if (res.statusCode !== 200) {
+            reject(new Error(`Failed to fetch image: ${res.statusCode}`));
+            return;
+          }
+          const chunks = [];
+          res.on('data', (chunk) => chunks.push(chunk));
+          res.on('end', () => resolve(Buffer.concat(chunks)));
+          res.on('error', reject);
+        });
+        request.on('error', reject);
+      });
+    };
+
+    let logo1Buffer, logo2Buffer;
+    try {
+      logo1Buffer = await fetchImage('https://upload.wikimedia.org/wikipedia/en/3/3e/Skill_India.png');
+      logo2Buffer = await fetchImage('https://ik.imagekit.io/sentyaztie/Dlogo.png?updatedAt=1749928182723');
+      console.log('Logos fetched successfully:', !!logo1Buffer, !!logo2Buffer);
+    } catch (err) {
+      console.error('Error fetching logos:', err);
+      // Continue without logos
+    }
+
     // Store certificate ID in CourseProgress
     await CourseProgress.findOneAndUpdate(
       { user: userId, course: id },
@@ -634,6 +675,14 @@ const generateCertificate = async (req, res) => {
     doc.quadraticCurveTo(innerX, innerY, innerX + innerRadius, innerY);
     doc.stroke();
 
+    // Add logos
+    if (logo1Buffer) {
+      doc.image(logo1Buffer, 50, 35, { width: 70 });
+    }
+    if (logo2Buffer) {
+      doc.image(logo2Buffer, W - 120, 35, { width: 70 });
+    }
+
     // ============================================================
     // HEADER AREA
     // ============================================================
@@ -643,19 +692,19 @@ const generateCertificate = async (req, res) => {
   doc.fillColor("#003E82")
     .fontSize(26)                 // smaller
     .font("Helvetica-Bold")
-    .text("SoSapient Inc.", 0, 45, { align: "center" });
+    .text("SoSapient Inc.", 0, 65, { align: "center" });
   
   doc.fillColor("#003E82")
     .fontSize(45)                 // smaller
     .font("Helvetica-Bold")
-    .text("CERTIFICATE", 0, 90, { align: "center", characterSpacing: 1 });
+    .text("CERTIFICATE", 0, 110, { align: "center", characterSpacing: 1 });
   
   doc.fontSize(24)                // smaller
     .font("Helvetica-Bold")
-    .text("OF COMPLETION", 0, 140, { align: "center" });
+    .text("OF COMPLETION", 0, 160, { align: "center" });
   
   // Updated separator position for perfect spacing
-  doc.moveTo(150, 185).lineTo(W - 150, 185).strokeColor("#1C6DD0").lineWidth(2).stroke();
+  doc.moveTo(150, 205).lineTo(W - 150, 205).strokeColor("#1C6DD0").lineWidth(2).stroke();
 
 
     // ============================================================
@@ -664,22 +713,22 @@ const generateCertificate = async (req, res) => {
     doc.fillColor("#444")
       .fontSize(20)
       .font("Helvetica")
-      .text("This is to certify that", 0, 235, { align: "center" });
+      .text("This is to certify that", 0, 255, { align: "center" });
     
     doc.fillColor("#003E82")
       .fontSize(40)
       .font("Helvetica-Bold")
-      .text(`${user.firstName} ${user.lastName}`, 0, 275, { align: "center" });
+      .text(`${user.firstName} ${user.lastName}`, 0, 295, { align: "center" });
     
     doc.fillColor("#555")
       .fontSize(18)
       .font("Helvetica")
-      .text("has successfully completed the course", 0, 320, { align: "center" });
+      .text("has successfully completed the course", 0, 340, { align: "center" });
     
     doc.fillColor("#003E82")
       .fontSize(28)
       .font("Helvetica-Bold")
-      .text(`"${course.title}"`, 0, 360, { align: "center" });
+      .text(`"${course.title}"`, 0, 380, { align: "center" });
 
     const completionDateFormatted = completionDate.toLocaleDateString("en-US", {
       year: "numeric",
@@ -689,7 +738,7 @@ const generateCertificate = async (req, res) => {
     
     doc.fillColor("#666")
       .fontSize(15)
-      .text(`Completed on: ${completionDateFormatted}`, 0, 400, { align: "center" });
+      .text(`Completed on: ${completionDateFormatted}`, 0, 420, { align: "center" });
     
     // Short paragraph (clean centered)
     doc.fillColor("#777")
@@ -697,7 +746,7 @@ const generateCertificate = async (req, res) => {
       .text(
         "This certificate acknowledges the successful completion of the course and recognizes the learner's dedication to personal growth and professional development.",
         120,
-        420,
+        440,
         {
           width: W - 240,
           align: "center",
@@ -1183,6 +1232,38 @@ const downloadCertificate = async (req, res) => {
     const user = courseProgress.userDetails;
     const course = courseProgress.courseDetails;
     const completionDate = courseProgress.updatedAt;
+
+    // Fetch logos
+    const fetchImage = (url) => {
+      return new Promise((resolve, reject) => {
+        const request = https.get(url, (res) => {
+          if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 303) {
+            // Follow redirect
+            fetchImage(res.headers.location).then(resolve).catch(reject);
+            return;
+          }
+          if (res.statusCode !== 200) {
+            reject(new Error(`Failed to fetch image: ${res.statusCode}`));
+            return;
+          }
+          const chunks = [];
+          res.on('data', (chunk) => chunks.push(chunk));
+          res.on('end', () => resolve(Buffer.concat(chunks)));
+          res.on('error', reject);
+        });
+        request.on('error', reject);
+      });
+    };
+
+    let logo1Buffer, logo2Buffer;
+    try {
+      logo1Buffer = await fetchImage('https://upload.wikimedia.org/wikipedia/en/3/3e/Skill_India.png');
+      logo2Buffer = await fetchImage('https://ik.imagekit.io/sentyaztie/Dlogo.png?updatedAt=1749928182723');
+      console.log('Logos fetched successfully:', !!logo1Buffer, !!logo2Buffer);
+    } catch (err) {
+      console.error('Error fetching logos:', err);
+      // Continue without logos
+    }
 
     // ===== PDF SETUP =====
     const doc = new PDFDocument({
