@@ -583,7 +583,11 @@ const generateCertificate = async (req, res) => {
     // Fetch logos
     const fetchImage = (url) => {
       return new Promise((resolve, reject) => {
-        const request = https.get(url, (res) => {
+        const request = https.get(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; CertificateGenerator/1.0)'
+          }
+        }, (res) => {
           if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 303) {
             // Follow redirect
             fetchImage(res.headers.location).then(resolve).catch(reject);
@@ -605,7 +609,7 @@ const generateCertificate = async (req, res) => {
     let logo1Buffer, logo2Buffer;
     try {
       logo1Buffer = await fetchImage('https://upload.wikimedia.org/wikipedia/en/3/3e/Skill_India.png');
-      logo2Buffer = await fetchImage('https://ik.imagekit.io/sentyaztie/Dlogo.png?updatedAt=1749928182723');
+      logo2Buffer = await fetchImage('https://media.licdn.com/dms/image/v2/D4D0BAQE39yztDz8uJA/company-logo_200_200/company-logo_200_200/0/1702301275620/spient_logo?e=2147483647&v=beta&t=a5RHTSjfOoN1-QHYBRvNR0xME95lYfk18hdQNtS18JY');
       console.log('Logos fetched successfully:', !!logo1Buffer, !!logo2Buffer);
     } catch (err) {
       console.error('Error fetching logos:', err);
@@ -1236,7 +1240,11 @@ const downloadCertificate = async (req, res) => {
     // Fetch logos
     const fetchImage = (url) => {
       return new Promise((resolve, reject) => {
-        const request = https.get(url, (res) => {
+        const request = https.get(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; CertificateGenerator/1.0)'
+          }
+        }, (res) => {
           if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 303) {
             // Follow redirect
             fetchImage(res.headers.location).then(resolve).catch(reject);
@@ -1258,7 +1266,7 @@ const downloadCertificate = async (req, res) => {
     let logo1Buffer, logo2Buffer;
     try {
       logo1Buffer = await fetchImage('https://upload.wikimedia.org/wikipedia/en/3/3e/Skill_India.png');
-      logo2Buffer = await fetchImage('https://ik.imagekit.io/sentyaztie/Dlogo.png?updatedAt=1749928182723');
+      logo2Buffer = await fetchImage('https://media.licdn.com/dms/image/v2/D4D0BAQE39yztDz8uJA/company-logo_200_200/company-logo_200_200/0/1702301275620/spient_logo?e=2147483647&v=beta&t=a5RHTSjfOoN1-QHYBRvNR0xME95lYfk18hdQNtS18JY');
       console.log('Logos fetched successfully:', !!logo1Buffer, !!logo2Buffer);
     } catch (err) {
       console.error('Error fetching logos:', err);
