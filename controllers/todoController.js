@@ -10,27 +10,101 @@ const getTodos = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const skip = (page - 1) * limit;
 
-    let query = {};
+    let matchQuery = {};
     if (req.user.role === 'Employee') {
       // Employees can only see their own todos
-      query.employee = req.user._id;
+      matchQuery.employee = req.user._id;
     }
-    // Admins and SuperAdmins can see all todos (no additional filter)
 
-    const totalTodos = await Todo.countDocuments(query);
-    const todos = await Todo.find(query)
-      .populate('employee', 'firstName lastName email photo')
-      .populate('createdBy', 'firstName lastName')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
+    if (req.query.status && req.query.status !== 'all') {
+      matchQuery.status = req.query.status;
+    }
+
+    if (req.query.priority && req.query.priority !== 'all') {
+      matchQuery.priority = req.query.priority;
+    }
+
+    if (req.query.employee && req.query.employee !== 'all') {
+      matchQuery.employee = req.query.employee;
+    }
+
+    let pipeline = [
+      { $match: matchQuery },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'employee',
+          foreignField: '_id',
+          as: 'employee'
+        }
+      },
+      { $unwind: '$employee' },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'createdBy',
+          foreignField: '_id',
+          as: 'createdBy'
+        }
+      },
+      { $unwind: '$createdBy' },
+    ];
+
+    if (req.query.search) {
+      pipeline.push({
+        $match: {
+          $or: [
+            { title: { $regex: req.query.search, $options: 'i' } },
+            { 'employee.firstName': { $regex: req.query.search, $options: 'i' } },
+            { 'employee.lastName': { $regex: req.query.search, $options: 'i' } }
+          ]
+        }
+      });
+    }
+
+    pipeline.push(
+      { $sort: { createdAt: -1 } },
+      { $skip: skip },
+      { $limit: limit }
+    );
+
+    const todos = await Todo.aggregate(pipeline);
+
+    // For total count
+    let countPipeline = [
+      { $match: matchQuery },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'employee',
+          foreignField: '_id',
+          as: 'employee'
+        }
+      },
+      { $unwind: '$employee' },
+    ];
+
+    if (req.query.search) {
+      countPipeline.push({
+        $match: {
+          $or: [
+            { title: { $regex: req.query.search, $options: 'i' } },
+            { 'employee.firstName': { $regex: req.query.search, $options: 'i' } },
+            { 'employee.lastName': { $regex: req.query.search, $options: 'i' } }
+          ]
+        }
+      });
+    }
+
+    const totalTodos = await Todo.aggregate([...countPipeline, { $count: "total" }]);
+    const total = totalTodos.length > 0 ? totalTodos[0].total : 0;
 
     res.json({
       todos,
       pagination: {
         currentPage: page,
-        totalPages: Math.ceil(totalTodos / limit),
-        totalItems: totalTodos,
+        totalPages: Math.ceil(total / limit),
+        totalItems: total,
         itemsPerPage: limit
       }
     });
