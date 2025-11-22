@@ -72,6 +72,9 @@ app.use('/api/expenses', require('./routes/expenses'));
 app.use('/api/categories', require('./routes/categories'));
 app.use('/api/courses', require('./routes/courses'));
 app.use('/api/chats', require('./routes/chats'));
+app.use('/api/appraisals', require('./routes/appraisals'));
+app.use('/api/onboarding', require('./routes/onboarding'));
+app.use('/api/offboarding', require('./routes/offboarding'));
 
 // example protected route
 const authenticate = require('./middleware/auth');

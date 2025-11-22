@@ -44,7 +44,7 @@ const userSchema = new mongoose.Schema({
   instagram: String,
   upworkProfile: String,
   resume: String,
-  role: { type: String, enum: ['Employee', 'Admin', 'SuperAdmin'], default: 'Employee' },
+  role: { type: String, enum: ['Employee', 'Admin', 'SuperAdmin', 'HR', 'Manager'], default: 'Employee' },
   status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
   department: { type: mongoose.Schema.Types.ObjectId, ref: 'Department' },
   leaveBalance: {

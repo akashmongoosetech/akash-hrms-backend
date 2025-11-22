@@ -358,8 +358,8 @@ const createUser = async (req, res) => {
     if (role) {
       if (req.user.role === 'SuperAdmin') {
         assignedRole = role; // SuperAdmin can assign any role
-      } else if (req.user.role === 'Admin' && ['Employee', 'Admin'].includes(role)) {
-        assignedRole = role; // Admin can assign Employee or Admin
+      } else if (req.user.role === 'Admin' && ['Employee', 'Admin', 'HR', 'Manager'].includes(role)) {
+        assignedRole = role; // Admin can assign Employee, Admin, HR, or Manager
       } else {
         assignedRole = 'Employee'; // Default to Employee if unauthorized
       }
