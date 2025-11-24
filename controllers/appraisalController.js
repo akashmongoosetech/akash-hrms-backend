@@ -99,7 +99,20 @@ const createAppraisal = async (req, res) => {
 // Update appraisal
 const updateAppraisal = async (req, res) => {
   try {
-    const updates = req.body;
+    console.log('Update appraisal request:', req.params.id, req.body);
+    let updates = { ...req.body };
+
+    // Map employeeId to employee and reviewerId to reviewer
+    if (updates.employeeId) {
+      updates.employee = updates.employeeId;
+      delete updates.employeeId;
+    }
+    if (updates.reviewerId) {
+      updates.reviewer = updates.reviewerId;
+      delete updates.reviewerId;
+    }
+
+    console.log('Mapped updates:', updates);
 
     // Prevent updating certain fields if status is not draft
     const appraisal = await Appraisal.findById(req.params.id);
@@ -107,7 +120,9 @@ const updateAppraisal = async (req, res) => {
       return res.status(404).json({ message: 'Appraisal not found' });
     }
 
-    if (appraisal.status !== 'Draft' && req.user.role !== 'Admin') {
+    console.log('Appraisal status:', appraisal.status, 'User role:', req.user.role);
+
+    if (appraisal.status !== 'Draft' && req.user.role !== 'Admin' && req.user.role !== 'SuperAdmin') {
       // Only allow updating comments and goals progress for non-draft appraisals
       const allowedFields = ['goals', 'comments'];
       const filteredUpdates = {};
@@ -117,16 +132,20 @@ const updateAppraisal = async (req, res) => {
         }
       });
       updates = filteredUpdates;
+      console.log('Filtered updates for non-draft:', updates);
     }
+
+    console.log('Final updates:', updates);
 
     const updatedAppraisal = await Appraisal.findByIdAndUpdate(
       req.params.id,
-      updates,
-      { new: true, runValidators: true }
+      { $set: updates },
+      { new: true }
     )
       .populate('employee', 'firstName lastName email photo')
       .populate('reviewer', 'firstName lastName email photo');
 
+    console.log('Updated appraisal:', updatedAppraisal);
     res.json(updatedAppraisal);
   } catch (error) {
     console.error('Error updating appraisal:', error);
@@ -143,9 +162,10 @@ const deleteAppraisal = async (req, res) => {
       return res.status(404).json({ message: 'Appraisal not found' });
     }
 
-    // Only allow deletion of draft appraisals or by admin
-    if (appraisal.status !== 'Draft' && req.user.role !== 'Admin') {
-      return res.status(403).json({ message: 'Cannot delete submitted appraisal' });
+    // Allow deletion of submitted appraisals, approved/rejected only by admin/superadmin
+    if ((appraisal.status === 'Approved' || appraisal.status === 'Rejected') &&
+        req.user.role !== 'Admin' && req.user.role !== 'SuperAdmin') {
+      return res.status(403).json({ message: 'Cannot delete approved or rejected appraisal' });
     }
 
     await Appraisal.findByIdAndDelete(req.params.id);

@@ -8,24 +8,24 @@ const authorize = require('../middleware/authorize');
 router.use(auth);
 
 // Get all appraisals (HR/Admin can see all, employees see their own)
-router.get('/', authorize(['Admin', 'HR', 'Manager', 'Employee']), appraisalController.getAppraisals);
+router.get('/', authorize(['Admin', 'SuperAdmin', 'HR', 'Manager', 'Employee']), appraisalController.getAppraisals);
 
 // Get single appraisal
-router.get('/:id', authorize(['Admin', 'HR', 'Manager', 'Employee']), appraisalController.getAppraisalById);
+router.get('/:id', authorize(['Admin', 'SuperAdmin', 'HR', 'Manager', 'Employee']), appraisalController.getAppraisalById);
 
 // Create new appraisal (HR/Admin/Manager)
-router.post('/', authorize(['Admin', 'HR', 'Manager']), appraisalController.createAppraisal);
+router.post('/', authorize(['Admin', 'SuperAdmin', 'HR', 'Manager']), appraisalController.createAppraisal);
 
 // Update appraisal
-router.put('/:id', authorize(['Admin', 'HR', 'Manager', 'Employee']), appraisalController.updateAppraisal);
+router.put('/:id', authorize(['Admin', 'SuperAdmin', 'HR', 'Manager', 'Employee']), appraisalController.updateAppraisal);
 
 // Delete appraisal (Admin/HR only)
-router.delete('/:id', authorize(['Admin', 'HR']), appraisalController.deleteAppraisal);
+router.delete('/:id', authorize(['Admin', 'SuperAdmin', 'HR']), appraisalController.deleteAppraisal);
 
 // Submit appraisal for review
-router.post('/:id/submit', authorize(['Admin', 'HR', 'Manager', 'Employee']), appraisalController.submitAppraisal);
+router.post('/:id/submit', authorize(['Admin', 'SuperAdmin', 'HR', 'Manager', 'Employee']), appraisalController.submitAppraisal);
 
 // Review appraisal (Approve/Reject)
-router.post('/:id/review', authorize(['Admin', 'HR', 'Manager']), appraisalController.reviewAppraisal);
+router.post('/:id/review', authorize(['Admin', 'SuperAdmin', 'HR', 'Manager']), appraisalController.reviewAppraisal);
 
 module.exports = router;
