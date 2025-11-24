@@ -8,24 +8,24 @@ const authorize = require('../middleware/authorize');
 router.use(auth);
 
 // Get all onboardings
-router.get('/', authorize(['Admin', 'HR', 'Manager']), onboardingController.getOnboardings);
+router.get('/', authorize(['Admin', 'SuperAdmin', 'HR', 'Manager']), onboardingController.getOnboardings);
 
 // Get single onboarding
-router.get('/:id', authorize(['Admin', 'HR', 'Manager', 'Employee']), onboardingController.getOnboardingById);
+router.get('/:id', authorize(['Admin', 'SuperAdmin', 'HR', 'Manager', 'Employee']), onboardingController.getOnboardingById);
 
 // Create new onboarding
-router.post('/', authorize(['Admin', 'HR']), onboardingController.createOnboarding);
+router.post('/', authorize(['Admin', 'SuperAdmin', 'HR']), onboardingController.createOnboarding);
 
 // Update onboarding
-router.put('/:id', authorize(['Admin', 'HR', 'Manager']), onboardingController.updateOnboarding);
+router.put('/:id', authorize(['Admin', 'SuperAdmin', 'HR', 'Manager']), onboardingController.updateOnboarding);
 
 // Delete onboarding
-router.delete('/:id', authorize(['Admin', 'HR']), onboardingController.deleteOnboarding);
+router.delete('/:id', authorize(['Admin', 'SuperAdmin', 'HR']), onboardingController.deleteOnboarding);
 
 // Update task completion
-router.put('/:id/tasks/:taskId', authorize(['Admin', 'HR', 'Manager', 'Employee']), onboardingController.updateTaskCompletion);
+router.put('/:id/tasks/:taskId', authorize(['Admin', 'SuperAdmin', 'HR', 'Manager', 'Employee']), onboardingController.updateTaskCompletion);
 
 // Add task
-router.post('/:id/tasks', authorize(['Admin', 'HR', 'Manager']), onboardingController.addTask);
+router.post('/:id/tasks', authorize(['Admin', 'SuperAdmin', 'HR', 'Manager']), onboardingController.addTask);
 
 module.exports = router;
