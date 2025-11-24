@@ -198,6 +198,33 @@ const submitQuiz = async (req, res) => {
   }
 };
 
+// Admin: Get All Quiz Assignments
+const getAllAssignments = async (req, res) => {
+  try {
+    const assignments = await QuizAssignment.find()
+      .populate('employee_id', 'firstName lastName email')
+      .populate('question_id', 'question_text difficulty category')
+      .sort({ assigned_on: -1 });
+
+    // Get all submissions to check which are completed
+    const submissions = await QuizSubmission.find();
+    const submittedMap = new Map();
+    submissions.forEach(sub => {
+      submittedMap.set(`${sub.employee_id}-${sub.question_id}`, true);
+    });
+
+    const assignmentsWithStatus = assignments.map(assignment => ({
+      ...assignment.toObject(),
+      completed: submittedMap.has(`${assignment.employee_id._id}-${assignment.question_id._id}`)
+    }));
+
+    res.json(assignmentsWithStatus);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 // Get Quiz Scores (for employee or admin)
 const getQuizScores = async (req, res) => {
   try {
@@ -227,5 +254,6 @@ module.exports = {
   assignQuiz,
   getAssignedQuizzes,
   submitQuiz,
+  getAllAssignments,
   getQuizScores
 };

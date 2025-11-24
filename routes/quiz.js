@@ -10,6 +10,7 @@ router.get('/admin/questions', authenticate, authorizeRoles('Admin'), quizContro
 router.put('/admin/question/:id', authenticate, authorizeRoles('Admin'), quizController.updateQuestion);
 router.delete('/admin/question/:id', authenticate, authorizeRoles('Admin'), quizController.deleteQuestion);
 router.post('/admin/assign-quiz', authenticate, authorizeRoles('Admin'), quizController.assignQuiz);
+router.get('/admin/assignments', authenticate, authorizeRoles('Admin'), quizController.getAllAssignments);
 
 // Employee routes
 router.get('/employee/quizzes', authenticate, authorizeRoles('Employee'), quizController.getAssignedQuizzes);
