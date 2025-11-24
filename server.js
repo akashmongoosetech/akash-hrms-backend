@@ -75,6 +75,7 @@ app.use('/api/chats', require('./routes/chats'));
 app.use('/api/appraisals', require('./routes/appraisals'));
 app.use('/api/onboarding', require('./routes/onboarding'));
 app.use('/api/offboarding', require('./routes/offboarding'));
+app.use('/api/quiz', require('./routes/quiz'));
 
 // example protected route
 const authenticate = require('./middleware/auth');
