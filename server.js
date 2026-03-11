@@ -16,12 +16,16 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: ["http://localhost:5173", "https://hrms.sosapient.in", "https://akash-hrms-frontend.onrender.com"], // Frontend URLs for development and production
-    methods: ["GET", "POST"]
+    origin: ["http://localhost:5173", "https://hrms.sosapient.in", "https://akash-hrms-frontend.onrender.com", "https://hrms.akashraikwar.in"], // Frontend URLs for development and production
+    methods: ["GET", "POST"],
+    credentials: true
   }
 });
 
-app.use(cors());
+app.use(cors({
+  origin: ["http://localhost:5173", "https://hrms.sosapient.in", "https://akash-hrms-frontend.onrender.com", "https://hrms.akashraikwar.in"],
+  credentials: true
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
