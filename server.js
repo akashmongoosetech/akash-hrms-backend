@@ -76,6 +76,8 @@ app.use('/api/appraisals', require('./routes/appraisals'));
 app.use('/api/onboarding', require('./routes/onboarding'));
 app.use('/api/offboarding', require('./routes/offboarding'));
 app.use('/api/quiz', require('./routes/quiz'));
+app.use('/api/location', require('./routes/location'));
+app.use('/api/geofence', require('./routes/geofence'));
 
 // example protected route
 const authenticate = require('./middleware/auth');
