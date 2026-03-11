@@ -76,27 +76,26 @@ const deleteQuestion = async (req, res) => {
 // Admin: Assign Quiz to Employee
 const assignQuiz = async (req, res) => {
   try {
-    const { employee_id, questions, due_date } = req.body;
+    const { employee_id, modules, due_date } = req.body;
 
-    if (!employee_id || !questions || questions.length === 0) {
-      return res.status(400).json({ message: 'Employee ID and questions are required' });
+    if (!employee_id || !modules || modules.length === 0) {
+      return res.status(400).json({ message: 'Employee ID and modules are required' });
     }
 
     // Check if employee exists
     const employee = await User.findById(employee_id);
     if (!employee) return res.status(404).json({ message: 'Employee not found' });
 
-    // Check if questions exist
-    const questionIds = questions.map(q => q.id || q);
-    const existingQuestions = await Question.find({ _id: { $in: questionIds } });
-    if (existingQuestions.length !== questionIds.length) {
-      return res.status(400).json({ message: 'Some questions not found' });
+    // Get all questions for the selected modules
+    const questions = await Question.find({ category: { $in: modules } });
+    if (questions.length === 0) {
+      return res.status(400).json({ message: 'No questions found for the selected modules' });
     }
 
-    // Create assignments
-    const assignments = questionIds.map(questionId => ({
+    // Create assignments for all questions in the modules
+    const assignments = questions.map(question => ({
       employee_id,
-      question_id: questionId,
+      question_id: question._id,
       due_date: due_date ? new Date(due_date) : null
     }));
 
