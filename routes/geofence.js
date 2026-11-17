@@ -14,17 +14,17 @@ const {
 const authenticate = require('../middleware/auth');
 const authorizeRoles = require('../middleware/authorize');
 
+// Alert routes (Admin only) — must be declared before '/:id' or they are shadowed
+router.get('/alerts', authenticate, authorizeRoles('Admin'), getAlerts);
+router.get('/alerts/count', authenticate, authorizeRoles('Admin'), getUnreadAlertCount);
+router.put('/alerts/:id/read', authenticate, authorizeRoles('Admin'), markAlertAsRead);
+router.put('/alerts/:id/resolve', authenticate, authorizeRoles('Admin'), resolveAlert);
+
 // Geofence CRUD routes (Admin only)
 router.post('/create', authenticate, authorizeRoles('Admin'), createGeoFence);
 router.get('/', authenticate, authorizeRoles('Admin'), getGeoFences);
 router.get('/:id', authenticate, authorizeRoles('Admin'), getGeoFence);
 router.put('/:id', authenticate, authorizeRoles('Admin'), updateGeoFence);
 router.delete('/:id', authenticate, authorizeRoles('Admin'), deleteGeoFence);
-
-// Alert routes (Admin only)
-router.get('/alerts', authenticate, authorizeRoles('Admin'), getAlerts);
-router.get('/alerts/count', authenticate, authorizeRoles('Admin'), getUnreadAlertCount);
-router.put('/alerts/:id/read', authenticate, authorizeRoles('Admin'), markAlertAsRead);
-router.put('/alerts/:id/resolve', authenticate, authorizeRoles('Admin'), resolveAlert);
 
 module.exports = router;

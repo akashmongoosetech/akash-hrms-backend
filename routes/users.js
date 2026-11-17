@@ -19,7 +19,15 @@ router.get('/me', authenticate, userController.getCurrentUser);
 // Get all users - Employee and above
 router.get('/', authenticate, authorizeRoles('Employee'), userController.getUsers);
 
-// Get user by ID - Employee and above
+// Dashboard preferences routes (must be declared before '/:id' or they are shadowed)
+router.post('/dashboard-preferences', authenticate, userController.saveDashboardPreferences);
+router.get('/dashboard-preferences', authenticate, userController.getDashboardPreferences);
+
+// Push notification subscription routes
+router.post('/subscribe-push', authenticate, userController.subscribePush);
+router.post('/unsubscribe-push', authenticate, userController.unsubscribePush);
+
+// Get user by ID - Employee and above (safe projection for non-personnel roles)
 router.get('/:id', authenticate, authorizeRoles('Employee'), userController.getUserById);
 
 // Create new user - Admin and SuperAdmin only
@@ -30,13 +38,5 @@ router.put('/:id', authenticate, authorizeRoles('Employee'), cpUpload, userContr
 
 // Delete user - SuperAdmin only
 router.delete('/:id', authenticate, authorizeRoles('SuperAdmin'), userController.deleteUser);
-
-// Dashboard preferences routes
-router.post('/dashboard-preferences', authenticate, userController.saveDashboardPreferences);
-router.get('/dashboard-preferences', authenticate, userController.getDashboardPreferences);
-
-// Push notification subscription routes
-router.post('/subscribe-push', authenticate, userController.subscribePush);
-router.post('/unsubscribe-push', authenticate, userController.unsubscribePush);
 
 module.exports = router;

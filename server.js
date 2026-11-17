@@ -4,6 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const jwt = require('jsonwebtoken');
 const socketIo = require('socket.io');
 const webpush = require('web-push');
 const cron = require('node-cron');
@@ -95,17 +96,91 @@ app.get('/api/protected/admin', authenticate, authorizeRoles('Admin'), (req, res
   return res.json({ message: 'Hello Admin', user: req.user.email });
 });
 
+// ---------------------------------------------------------------------------
+// Centralised API 404 + error handling.
+// Must be registered after every route. Never leaks stack traces or driver
+// internals to the client; upload/multer failures become 413/400 instead of 500.
+// ---------------------------------------------------------------------------
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    return res.status(404).json({ message: 'Endpoint not found' });
+  }
+  return next();
+});
+
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+
+  console.error(`[${req.method} ${req.originalUrl}]`, err && err.message);
+
+  if (err && err.name === 'MulterError') {
+    const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
+    const message = err.code === 'LIMIT_FILE_SIZE'
+      ? 'File is too large'
+      : err.message || 'Upload rejected';
+    return res.status(status).json({ message });
+  }
+
+  if (err && typeof err.message === 'string' && err.message.startsWith('Unsupported file type')) {
+    return res.status(400).json({ message: err.message });
+  }
+
+  if (err && err.name === 'ValidationError') {
+    return res.status(400).json({
+      message: 'Validation failed',
+      fields: Object.keys(err.errors || {})
+    });
+  }
+
+  if (err && err.name === 'CastError') {
+    return res.status(400).json({ message: 'Invalid identifier' });
+  }
+
+  if (err && err.code === 11000) {
+    return res.status(409).json({ message: 'Duplicate value' });
+  }
+
+  return res.status(500).json({ message: 'Server error' });
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled promise rejection:', reason);
+});
+
+// Socket.io authentication: verify the JWT during the handshake. The room a
+// socket can receive events on is derived from the token, never from client
+// input (previously any client could emit 'join' with another user's id).
+io.use(async (socket, next) => {
+  try {
+    const rawToken = socket.handshake.auth?.token
+      || socket.handshake.headers?.authorization
+      || '';
+    const token = String(rawToken).replace(/^Bearer\s+/i, '');
+    if (!token) return next(new Error('Authentication required'));
+
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await User.findById(payload.id).select('_id role status');
+    if (!user || user.status === 'Deleted') return next(new Error('Authentication failed'));
+
+    socket.user = { id: String(user._id), role: user.role };
+    return next();
+  } catch (err) {
+    return next(new Error('Authentication failed'));
+  }
+});
+
 // Socket.io connection
 io.on('connection', (socket) => {
-  console.log('User connected:', socket.id);
+  const room = socket.user.id;
+  socket.join(room);
 
+  // Legacy clients still emit 'join'; only their own room is accepted.
   socket.on('join', (userId) => {
-    socket.join(userId);
-    console.log(`User ${userId} joined room`);
+    if (String(userId) === room) socket.join(room);
   });
 
   socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.id);
+    // no-op
   });
 });
 

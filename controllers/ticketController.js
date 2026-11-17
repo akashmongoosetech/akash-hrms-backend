@@ -47,6 +47,12 @@ const getTicketById = async (req, res) => {
       .populate('progress.updatedBy', 'firstName lastName role');
     if (!ticket) return res.status(404).json({ message: 'Ticket not found' });
 
+    // Employees may only read tickets assigned to them.
+    const ownerId = ticket.employee?._id || ticket.employee;
+    if (req.user.role === 'Employee' && String(ownerId) !== String(req.user._id)) {
+      return res.status(404).json({ message: 'Ticket not found' });
+    }
+
     res.json(ticket);
   } catch (err) {
     console.error(err);
@@ -200,8 +206,14 @@ const updateTicket = async (req, res) => {
       delete updates.currentProgress;
     }
 
-    // Update other fields
-    Object.assign(ticket, updates);
+    // Update only whitelisted fields (prevents reassignment / arbitrary patching)
+    const assignableFields = req.user.role === 'Employee'
+      ? ['title', 'description', 'priority', 'dueDate']
+      : ['title', 'description', 'priority', 'dueDate', 'employee', 'currentProgress', 'progress'];
+
+    for (const field of assignableFields) {
+      if (updates[field] !== undefined) ticket[field] = updates[field];
+    }
 
     await ticket.save();
     await ticket.populate([

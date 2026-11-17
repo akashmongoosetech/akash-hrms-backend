@@ -24,7 +24,8 @@ const getTodos = async (req, res) => {
       matchQuery.priority = req.query.priority;
     }
 
-    if (req.query.employee && req.query.employee !== 'all') {
+    // Employees must never be able to widen their scope with ?employee=<otherId>
+    if (req.user.role !== 'Employee' && req.query.employee && req.query.employee !== 'all') {
       matchQuery.employee = req.query.employee;
     }
 

@@ -1,8 +1,56 @@
 const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
+const mongoose = require('mongoose');
 const User = require('../models/User');
 const DeletedEmployee = require('../models/DeletedEmployee');
 const webpush = require('web-push');
+
+// Directory-level projection: safe for any authenticated employee to read.
+const DIRECTORY_FIELDS = [
+  'firstName', 'lastName', 'photo', 'role', 'department', 'email',
+  'mobile1', 'gender', 'joiningDate', 'status', 'employeeCode'
+].join(' ');
+
+// Roles that may read the full employee record (payroll / identity documents).
+const PERSONNEL_ROLES = ['Admin', 'SuperAdmin', 'HR'];
+
+// Fields an employee may change on their own profile.
+// NOTE: email, salary, role, status and employeeCode are intentionally excluded.
+const SELF_SERVICE_FIELDS = [
+  'firstName', 'lastName', 'gender', 'dob', 'mobile1', 'mobile2',
+  'address1', 'address2', 'emergencyContact1', 'emergencyContact2', 'emergencyContact3',
+  'skillsFrontend', 'skillsBackend', 'bankAccountName', 'bankAccountNo', 'bankName',
+  'ifscCode', 'bankAddress', 'aadharCardNumber', 'drivingLicenseNumber', 'panCardNumber',
+  'facebook', 'twitter', 'linkedin', 'instagram', 'upworkProfile'
+];
+
+// Fields an Admin/SuperAdmin may change on another user's record.
+const ADMIN_MANAGED_FIELDS = [
+  'firstName', 'lastName', 'email', 'gender', 'dob', 'joiningDate', 'mobile1', 'mobile2',
+  'address1', 'address2', 'emergencyContact1', 'emergencyContact2', 'emergencyContact3',
+  'skillsFrontend', 'skillsBackend', 'bankAccountName', 'bankAccountNo', 'bankName',
+  'ifscCode', 'bankAddress', 'salary', 'salaryDetails', 'aadharCardNumber',
+  'drivingLicenseNumber', 'panCardNumber', 'facebook', 'twitter', 'linkedin', 'instagram',
+  'upworkProfile', 'role', 'status', 'department', 'employeeCode', 'leaveBalance'
+];
+
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+const sanitizeBody = (body = {}) => {
+  const clean = {};
+  for (const key of Object.keys(body)) {
+    if (!DANGEROUS_KEYS.has(key)) clean[key] = body[key];
+  }
+  return clean;
+};
+
+const pickFields = (source, allowed) => {
+  const picked = {};
+  for (const field of allowed) {
+    if (Object.prototype.hasOwnProperty.call(source, field)) picked[field] = source[field];
+  }
+  return picked;
+};
 
 // Create transporter for email
 const transporter = nodemailer.createTransport({
@@ -134,7 +182,14 @@ const getUsers = async (req, res) => {
     }
 
     const totalUsers = await User.countDocuments(query);
-    const users = await User.find(query, '-password').populate('department').sort({ createdAt: -1 }).skip(skip).limit(limit);
+    // Only personnel roles may see payroll / identity data. Everyone else gets
+    // the directory projection.
+    const projection = PERSONNEL_ROLES.includes(req.user.role) ? '-password' : DIRECTORY_FIELDS;
+    const users = await User.find(query, projection)
+      .populate('department')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
 
     res.json({
       users,
@@ -164,7 +219,18 @@ const getCurrentUser = async (req, res) => {
 
 const getUserById = async (req, res) => {
   try {
-    const user = await User.findById(req.params.id, '-password').populate('department');
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const isSelf = req.user._id.toString() === req.params.id;
+    const canViewFullProfile = isSelf || PERSONNEL_ROLES.includes(req.user.role);
+
+    const user = await User.findById(
+      req.params.id,
+      canViewFullProfile ? '-password' : DIRECTORY_FIELDS
+    ).populate('department');
+
     if (!user) return res.status(404).json({ message: 'User not found' });
     res.json(user);
   } catch (err) {
@@ -176,46 +242,47 @@ const getUserById = async (req, res) => {
 const updateUser = async (req, res) => {
   try {
     const { id } = req.params;
-    let updates = req.body;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const target = await User.findById(id);
+    if (!target) return res.status(404).json({ message: 'User not found' });
 
     // Check if user is trying to update their own profile or has admin privileges
     const isOwnProfile = req.user._id.toString() === id;
     const isAdminOrSuperAdmin = ['Admin', 'SuperAdmin'].includes(req.user.role);
+    const isSuperAdmin = req.user.role === 'SuperAdmin';
 
     if (!isOwnProfile && !isAdminOrSuperAdmin) {
       return res.status(403).json({ message: 'Forbidden: insufficient permissions' });
     }
 
-    // If user is updating their own profile, restrict certain fields
-    if (isOwnProfile && !isAdminOrSuperAdmin) {
-      // Employees can only update non-sensitive fields
-      const allowedFields = [
-        'firstName', 'lastName', 'email', 'gender', 'dob', 'mobile1', 'mobile2',
-        'address1', 'address2', 'emergencyContact1', 'emergencyContact2', 'emergencyContact3',
-        'skillsFrontend', 'skillsBackend', 'bankAccountName', 'bankAccountNo', 'bankName',
-        'ifscCode', 'bankAddress', 'aadharCardNumber', 'drivingLicenseNumber', 'panCardNumber',
-        'facebook', 'twitter', 'linkedin', 'instagram', 'upworkProfile', 'salary'
-      ];
+    // Only a SuperAdmin may modify a SuperAdmin account. This closes the
+    // "Admin resets a SuperAdmin password" account-takeover path.
+    if (!isOwnProfile && target.role === 'SuperAdmin' && !isSuperAdmin) {
+      return res.status(403).json({ message: 'Forbidden: only a SuperAdmin can modify a SuperAdmin account' });
+    }
 
-      // Filter updates to only allowed fields
-      const filteredUpdates = {};
-      for (const field of allowedFields) {
-        if (Object.prototype.hasOwnProperty.call(updates, field)) {
-          filteredUpdates[field] = updates[field];
+    // Never trust the client to decide which fields are writable.
+    let updates = sanitizeBody(req.body);
+
+    if (isAdminOrSuperAdmin) {
+      updates = pickFields(updates, ADMIN_MANAGED_FIELDS);
+    } else {
+      // Employees editing their own profile.
+      updates = pickFields(updates, SELF_SERVICE_FIELDS);
+    }
+
+    // Parse JSON fields if they are strings (FormData always sends strings)
+    for (const jsonField of ['skillsFrontend', 'skillsBackend', 'salaryDetails']) {
+      if (typeof updates[jsonField] === 'string') {
+        try {
+          updates[jsonField] = JSON.parse(updates[jsonField]);
+        } catch {
+          return res.status(400).json({ message: `Invalid JSON in ${jsonField}` });
         }
       }
-      updates = filteredUpdates;
-    }
-
-    // Parse JSON fields if they are strings
-    if (updates.skillsFrontend && typeof updates.skillsFrontend === 'string') {
-      updates.skillsFrontend = JSON.parse(updates.skillsFrontend);
-    }
-    if (updates.skillsBackend && typeof updates.skillsBackend === 'string') {
-      updates.skillsBackend = JSON.parse(updates.skillsBackend);
-    }
-    if (updates.salaryDetails && typeof updates.salaryDetails === 'string') {
-      updates.salaryDetails = JSON.parse(updates.salaryDetails);
     }
 
     // Handle file uploads
@@ -227,22 +294,14 @@ const updateUser = async (req, res) => {
       if (req.files['photo']) updates.photo = req.files['photo'][0].path;
     }
 
-    // Handle profilePictures updates (if sent as JSON)
-    if (updates.profilePictures && typeof updates.profilePictures === 'string') {
-      updates.profilePictures = JSON.parse(updates.profilePictures);
-    }
-
-    // Handle password update
-    if (updates.password && updates.password.trim() !== '') {
-      updates.password = await bcrypt.hash(updates.password, 10);
-    } else {
-      delete updates.password; // Don't update if empty
+    // Password changes are only ever allowed on your own account.
+    if (isOwnProfile && typeof req.body.password === 'string' && req.body.password.trim() !== '') {
+      updates.password = await bcrypt.hash(req.body.password, 10);
     }
 
     // Handle employeeCode: generate if not provided and user doesn't have one
-    if (!updates.employeeCode || updates.employeeCode.trim() === '') {
-      const existingUser = await User.findById(id);
-      if (!existingUser.employeeCode) {
+    if (!updates.employeeCode || String(updates.employeeCode).trim() === '') {
+      if (!target.employeeCode) {
         // Generate new employee code
         const lastUser = await User.findOne({ employeeCode: { $regex: /^SOEM/ } }).sort({ employeeCode: -1 });
         let nextNumber = 1;
@@ -257,17 +316,29 @@ const updateUser = async (req, res) => {
       }
     }
 
-    // Role hierarchy check: only SuperAdmin can assign SuperAdmin role
-    if (updates.role && updates.role === 'SuperAdmin' && req.user.role !== 'SuperAdmin') {
-      return res.status(403).json({ message: 'Only SuperAdmin can assign SuperAdmin role' });
+    // Role assignment rules
+    if (updates.role) {
+      const assignableRoles = isSuperAdmin
+        ? ['Employee', 'HR', 'Manager', 'Admin', 'SuperAdmin']
+        : ['Employee', 'HR', 'Manager', 'Admin'];
+
+      if (!assignableRoles.includes(updates.role)) {
+        return res.status(403).json({ message: 'Forbidden: you cannot assign this role' });
+      }
+
+      // Nobody may change their own role (prevents self-elevation and lockouts).
+      if (isOwnProfile) {
+        delete updates.role;
+      }
     }
 
-    // Admins can only update roles to Employee or Admin, not SuperAdmin
-    if (updates.role && req.user.role === 'Admin' && updates.role === 'SuperAdmin') {
-      return res.status(403).json({ message: 'Admins cannot assign SuperAdmin role' });
+    // Status is only ever Active/Inactive through this endpoint.
+    // Account deletion goes through DELETE /api/users/:id.
+    if (updates.status && !['Active', 'Inactive'].includes(updates.status)) {
+      return res.status(400).json({ message: 'Invalid status value' });
     }
 
-    const user = await User.findByIdAndUpdate(id, updates, { new: true, runValidators: true });
+    const user = await User.findByIdAndUpdate(id, updates, { new: true, runValidators: true }).select('-password');
     if (!user) return res.status(404).json({ message: 'User not found' });
 
     res.json({ message: 'User updated successfully', user });

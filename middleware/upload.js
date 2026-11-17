@@ -33,6 +33,35 @@ if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && proce
   });
 }
 
-const upload = multer({ storage });
+// Defence in depth: restrict what can be uploaded at all.
+// SVG and HTML are intentionally excluded because they execute as script on the
+// API origin when served from /api/uploads.
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+const MAX_FILES = 20;
+
+const ALLOWED_MIME_TYPES = new Set([
+  'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/plain', 'text/csv',
+  'video/mp4', 'video/webm', 'video/quicktime',
+  'audio/mpeg',
+]);
+
+const fileFilter = (req, file, cb) => {
+  if (ALLOWED_MIME_TYPES.has(file.mimetype)) return cb(null, true);
+  return cb(new Error(`Unsupported file type: ${file.mimetype}`));
+};
+
+const upload = multer({
+  storage,
+  limits: { fileSize: MAX_FILE_SIZE, files: MAX_FILES },
+  fileFilter,
+});
+
+upload.MAX_FILE_SIZE = MAX_FILE_SIZE;
 
 module.exports = upload;

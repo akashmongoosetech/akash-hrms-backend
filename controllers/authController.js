@@ -47,8 +47,19 @@ const signup = async (req, res) => {
       if (req.files['photo']) userData.photo = req.files['photo'][0].path;
     }
 
-    // Role assignment for signup - allow role selection but default to Employee
-    userData.role = req.body.role || 'Employee';
+    // Public self-registration always creates an Employee. Elevated roles must be
+    // assigned by an Admin/SuperAdmin through POST /api/users.
+    userData.role = 'Employee';
+
+    // employeeCode is uniquely indexed (non-sparse on existing databases), so a
+    // missing value would collide with any other user that has no code.
+    const lastUser = await User.findOne({ employeeCode: { $regex: /^SOEM/ } }).sort({ employeeCode: -1 });
+    let nextNumber = 1;
+    if (lastUser && lastUser.employeeCode) {
+      const lastNumber = parseInt(lastUser.employeeCode.replace('SOEM', ''), 10);
+      if (Number.isFinite(lastNumber)) nextNumber = lastNumber + 1;
+    }
+    userData.employeeCode = `SOEM${nextNumber.toString().padStart(3, '0')}`;
 
     const user = new User(userData);
     await user.save();

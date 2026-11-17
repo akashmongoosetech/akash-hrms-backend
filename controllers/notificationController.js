@@ -1,6 +1,13 @@
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 
+const PRIVILEGED_ROLES = ['Admin', 'SuperAdmin'];
+
+// Notifications are private: only the owner (or an admin) may read/modify them.
+const canAccessUserNotifications = (req, userId) =>
+  String(req.user._id) === String(userId) || PRIVILEGED_ROLES.includes(req.user.role);
+
+
 // Get notifications for a user
 const getUserNotifications = async (req, res) => {
   try {
@@ -8,6 +15,10 @@ const getUserNotifications = async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 20;
     const skip = (page - 1) * limit;
+
+    if (!canAccessUserNotifications(req, userId)) {
+      return res.status(403).json({ message: 'Forbidden: you can only access your own notifications' });
+    }
 
     const notifications = await Notification.find({ user: userId })
       .sort({ createdAt: -1 })
@@ -38,6 +49,11 @@ const getUserNotifications = async (req, res) => {
 const getUnreadCount = async (req, res) => {
   try {
     const userId = req.params.userId;
+
+    if (!canAccessUserNotifications(req, userId)) {
+      return res.status(403).json({ message: 'Forbidden: you can only access your own notifications' });
+    }
+
     const unreadCount = await Notification.countDocuments({ user: userId, read: false });
     res.json({ unreadCount });
   } catch (err) {
@@ -73,6 +89,10 @@ const markAsRead = async (req, res) => {
 const markAllAsRead = async (req, res) => {
   try {
     const userId = req.params.userId;
+
+    if (!canAccessUserNotifications(req, userId)) {
+      return res.status(403).json({ message: 'Forbidden: you can only modify your own notifications' });
+    }
 
     await Notification.updateMany(
       { user: userId, read: false },
@@ -128,6 +148,10 @@ const createNotificationsForAllUsers = async (type, title, message, data = {}) =
 // Delete old read notifications (cleanup)
 const cleanupOldNotifications = async (req, res) => {
   try {
+    if (!PRIVILEGED_ROLES.includes(req.user.role)) {
+      return res.status(403).json({ message: 'Forbidden: admin access required' });
+    }
+
     const daysOld = parseInt(req.query.days) || 30;
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysOld);

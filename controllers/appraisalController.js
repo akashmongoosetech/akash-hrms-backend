@@ -8,6 +8,13 @@ const getAppraisals = async (req, res) => {
     const skip = (page - 1) * limit;
 
     let query = {};
+    const role = req.user.role;
+    const canViewAll = ['Admin', 'SuperAdmin', 'HR'].includes(role);
+
+    if (!canViewAll) {
+      // Managers/employees only see appraisals they own or review.
+      query.$or = [{ employee: req.user._id }, { reviewer: req.user._id }];
+    }
 
     // Filter by employee if provided
     if (req.query.employeeId) {
@@ -66,6 +73,14 @@ const getAppraisalById = async (req, res) => {
       return res.status(404).json({ message: 'Appraisal not found' });
     }
 
+    const canView = ['Admin', 'SuperAdmin', 'HR'].includes(req.user.role)
+      || String(appraisal.employee?._id || appraisal.employee) === String(req.user._id)
+      || String(appraisal.reviewer?._id || appraisal.reviewer) === String(req.user._id);
+
+    if (!canView) {
+      return res.status(403).json({ message: 'Forbidden: you can only view your own appraisals' });
+    }
+
     res.json(appraisal);
   } catch (error) {
     console.error('Error fetching appraisal:', error);
@@ -121,6 +136,14 @@ const updateAppraisal = async (req, res) => {
     }
 
     console.log('Appraisal status:', appraisal.status, 'User role:', req.user.role);
+
+    const canEdit = ['Admin', 'SuperAdmin', 'HR'].includes(req.user.role)
+      || String(appraisal.reviewer) === String(req.user._id)
+      || (String(appraisal.employee) === String(req.user._id) && appraisal.status === 'Draft');
+
+    if (!canEdit) {
+      return res.status(403).json({ message: 'Forbidden: you cannot edit this appraisal' });
+    }
 
     if (appraisal.status !== 'Draft' && req.user.role !== 'Admin' && req.user.role !== 'SuperAdmin') {
       // Only allow updating comments and goals progress for non-draft appraisals
@@ -189,6 +212,13 @@ const submitAppraisal = async (req, res) => {
       return res.status(400).json({ message: 'Appraisal already submitted' });
     }
 
+    const canSubmit = ['Admin', 'SuperAdmin', 'HR', 'Manager'].includes(req.user.role)
+      || String(appraisal.employee) === String(req.user._id);
+
+    if (!canSubmit) {
+      return res.status(403).json({ message: 'Forbidden: you cannot submit this appraisal' });
+    }
+
     appraisal.status = 'Submitted';
     appraisal.submittedAt = new Date();
     await appraisal.save();
@@ -216,6 +246,13 @@ const reviewAppraisal = async (req, res) => {
 
     if (!['Approved', 'Rejected'].includes(status)) {
       return res.status(400).json({ message: 'Invalid status' });
+    }
+
+    const canReview = ['Admin', 'SuperAdmin', 'HR'].includes(req.user.role)
+      || String(appraisal.reviewer) === String(req.user._id);
+
+    if (!canReview) {
+      return res.status(403).json({ message: 'Forbidden: you cannot review this appraisal' });
     }
 
     appraisal.status = status;

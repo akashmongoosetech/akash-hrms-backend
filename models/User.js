@@ -7,7 +7,9 @@ const salarySchema = new mongoose.Schema({
 });
 
 const userSchema = new mongoose.Schema({
-  employeeCode: { type: String, unique: true },
+  // Unique only when present: without `sparse`, MongoDB allows a single document
+  // with a null/missing code, which makes the second registration fail (E11000).
+  employeeCode: { type: String, unique: true, sparse: true },
   firstName: { type: String, required: true },
   lastName: { type: String, required: true },
   email: { type: String, required: true, unique: true, lowercase: true },
@@ -45,7 +47,7 @@ const userSchema = new mongoose.Schema({
   upworkProfile: String,
   resume: String,
   role: { type: String, enum: ['Employee', 'Admin', 'SuperAdmin', 'HR', 'Manager'], default: 'Employee' },
-  status: { type: String, enum: ['Active', 'Inactive'], default: 'Active' },
+  status: { type: String, enum: ['Active', 'Inactive', 'Deleted'], default: 'Active' },
   department: { type: mongoose.Schema.Types.ObjectId, ref: 'Department' },
   leaveBalance: {
     vacation: { type: Number, default: 20 },

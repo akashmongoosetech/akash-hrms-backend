@@ -6,7 +6,7 @@ const sendMessage = async (req, res) => {
   try {
     const { receiverId, message } = req.body;
     const senderId = req.user._id;
-    const trimmedMessage = message.trim();
+    const trimmedMessage = (message || '').trim();
 
     console.log('req.body:', req.body);
     console.log('req.files:', req.files);

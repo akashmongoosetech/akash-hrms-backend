@@ -8,15 +8,15 @@ const authorizeRoles = require('../middleware/authorize');
 router.get('/', authenticate, authorizeRoles('Employee'), departmentController.getDepartments);
 
 // Get department by ID - Admin and SuperAdmin only
-router.get('/:id', authenticate, authorizeRoles('Admin', 'Employee'), departmentController.getDepartmentById);
+router.get('/:id', authenticate, authorizeRoles('Admin'), departmentController.getDepartmentById);
 
 // Create new department - Admin and SuperAdmin only
-router.post('/', authenticate, authorizeRoles('Admin', 'Employee'), departmentController.createDepartment);
+router.post('/', authenticate, authorizeRoles('Admin'), departmentController.createDepartment);
 
 // Update department - Admin and SuperAdmin only
-router.put('/:id', authenticate, authorizeRoles('Admin', 'Employee'), departmentController.updateDepartment);
+router.put('/:id', authenticate, authorizeRoles('Admin'), departmentController.updateDepartment);
 
-// Delete department - SuperAdmin only
-router.delete('/:id', authenticate, authorizeRoles('SuperAdmin', 'Employee'), departmentController.deleteDepartment);
+// Delete department - Admin and SuperAdmin only
+router.delete('/:id', authenticate, authorizeRoles('Admin'), departmentController.deleteDepartment);
 
 module.exports = router;
