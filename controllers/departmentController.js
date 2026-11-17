@@ -1,4 +1,5 @@
 const Department = require('../models/Department');
+const User = require('../models/User');
 
 const getDepartments = async (req, res) => {
   try {
@@ -13,8 +14,17 @@ const getDepartments = async (req, res) => {
       {
         $lookup: {
           from: 'users',
-          localField: '_id',
-          foreignField: 'department',
+          let: { departmentId: '$_id' },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: ['$department', '$$departmentId'] },
+                // Deleted accounts are archived, not active members of the department.
+                status: { $ne: 'Deleted' }
+              }
+            },
+            { $project: { _id: 1 } }
+          ],
           as: 'employees'
         }
       },
@@ -105,8 +115,25 @@ const deleteDepartment = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const department = await Department.findByIdAndDelete(id);
+    const department = await Department.findById(id);
     if (!department) return res.status(404).json({ message: 'Department not found' });
+
+    // Any role counts: an Employee, HR, Manager, Admin or SuperAdmin tied to this
+    // department blocks deletion until they are reassigned. Deleted accounts are
+    // ignored because they are archived, not active members.
+    const associatedUsers = await User.countDocuments({
+      department: id,
+      status: { $ne: 'Deleted' }
+    });
+
+    if (associatedUsers > 0) {
+      return res.status(409).json({
+        message: `Cannot delete "${department.name}": ${associatedUsers} ${associatedUsers === 1 ? 'employee is' : 'employees are'} still assigned to this department. Reassign them to another department first.`,
+        employeeCount: associatedUsers
+      });
+    }
+
+    await Department.findByIdAndDelete(id);
 
     res.json({ message: 'Department deleted successfully' });
   } catch (err) {
