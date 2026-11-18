@@ -7,13 +7,19 @@ const User = require('../models/User');
 // so each reaction can render the reacting employee's name and photo.
 const REACTION_POPULATE = { path: 'reactions.userId', select: 'firstName lastName photo' };
 
-const PICTOGRAPHIC = /\p{Extended_Pictographic}|\p{Emoji_Presentation}|\u200d|\ufe0f/u;
-const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
+// Characters that may legitimately appear inside an emoji: pictographs, emoji
+// components (skin tones, keycaps, regional indicators), joiners, variation
+// selectors and the tag characters used by subdivision flags.
+const EMOJI_CHARACTERS =
+  /^[\p{Emoji}\p{Emoji_Component}\u200d\ufe0f\u20e3\u{e0020}-\u{e007f}]+$/u;
+// Requires at least one real glyph so plain digits ("123") are still rejected.
+const HAS_EMOJI_GLYPH = /[\p{Extended_Pictographic}\p{Emoji_Presentation}\u{1f1e6}-\u{1f1ff}\u20e3]/u;
 
 /**
- * Accepts a single emoji (or emoji sequence such as a ZWJ family or a
- * skin-toned hand) and rejects arbitrary text so the reaction store stays
- * clean. Length is capped so a client cannot push a large string into Mongo.
+ * Accepts a single emoji (or emoji sequence such as a ZWJ family, a skin-toned
+ * hand, a keycap or a flag) and rejects arbitrary text so the reaction store
+ * stays clean. Length is capped so a client cannot push a large string into
+ * Mongo.
  */
 const normalizeEmoji = (value) => {
   if (typeof value !== 'string') return null;
@@ -21,8 +27,8 @@ const normalizeEmoji = (value) => {
   if (!emoji) return null;
   if (emoji.length > 16) return null;
   if (Array.from(emoji).length > 8) return null;
-  if (LETTER_OR_DIGIT.test(emoji)) return null;
-  if (!PICTOGRAPHIC.test(emoji)) return null;
+  if (!EMOJI_CHARACTERS.test(emoji)) return null;
+  if (!HAS_EMOJI_GLYPH.test(emoji)) return null;
   return emoji;
 };
 
