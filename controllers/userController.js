@@ -187,7 +187,9 @@ const getUsers = async (req, res) => {
     const projection = PERSONNEL_ROLES.includes(req.user.role) ? '-password' : DIRECTORY_FIELDS;
     const users = await User.find(query, projection)
       .populate('department')
-      .sort({ createdAt: -1 })
+      // _id is a tiebreaker: many imports share createdAt, and an unstable sort
+      // makes skip/limit pages return the same rows twice.
+      .sort({ createdAt: -1, _id: 1 })
       .skip(skip)
       .limit(limit);
 

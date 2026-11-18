@@ -6,6 +6,39 @@ const User = require('../models/User');
 const DeletedEmployee = require('../models/DeletedEmployee');
 const Notification = require('../models/Notification');
 
+// Signup accepts multipart/form-data, so every field arrives as a string.
+// The same controller is also reachable with a JSON body. Parse defensively:
+// a malformed skills/salary field must not turn a user mistake into a 500.
+const parseJsonField = (value, fallback) => {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+};
+
+const parseSkills = (value) => {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (typeof value !== 'string' || !value.trim()) return [];
+  const parsed = parseJsonField(value, undefined);
+  if (Array.isArray(parsed)) return parsed.filter(Boolean);
+  if (typeof parsed === 'string') return [parsed];
+  // Accept "React, Node" as well as a JSON array.
+  return value.split(',').map((s) => s.trim()).filter(Boolean);
+};
+
+const nextEmployeeCode = async () => {
+  const lastUser = await User.findOne({ employeeCode: { $regex: /^SOEM/ } }).sort({ employeeCode: -1 });
+  let nextNumber = 1;
+  if (lastUser && lastUser.employeeCode) {
+    const lastNumber = parseInt(lastUser.employeeCode.replace('SOEM', ''), 10);
+    if (Number.isFinite(lastNumber)) nextNumber = lastNumber + 1;
+  }
+  return `SOEM${nextNumber.toString().padStart(3, '0')}`;
+};
+
 const signup = async (req, res) => {
   try {
     const {
@@ -18,23 +51,30 @@ const signup = async (req, res) => {
       facebook, twitter, linkedin, instagram, upworkProfile
     } = req.body;
 
-    if (!firstName || !lastName || !email || !password) {
+    // The schema lowercases email on save, so queries must normalize too.
+    // Otherwise "John@x.com" then "john@x.com" passes the pre-check and then
+    // blows up on the unique index with a 500.
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+
+    if (!firstName || !lastName || !normalizedEmail || !password) {
       return res.status(400).json({ message: 'Missing required fields' });
     }
 
-    const existing = await User.findOne({ email });
+    const existing = await User.findOne({ email: normalizedEmail });
     if (existing) return res.status(409).json({ message: 'Email already registered' });
 
     const hashed = await bcrypt.hash(password, 10);
 
+    const salary = parseJsonField(salaryDetails, {});
+
     const userData = {
-      firstName, lastName, email, gender, dob, joiningDate,
+      firstName, lastName, email: normalizedEmail, gender, dob, joiningDate,
       mobile1, mobile2, password: hashed, address1, address2,
       emergencyContact1, emergencyContact2, emergencyContact3,
-      skillsFrontend: skillsFrontend ? JSON.parse(skillsFrontend) : [],
-      skillsBackend: skillsBackend ? JSON.parse(skillsBackend) : [],
+      skillsFrontend: parseSkills(skillsFrontend),
+      skillsBackend: parseSkills(skillsBackend),
       bankAccountName, bankAccountNo, bankName, ifscCode, bankAddress,
-      salaryDetails: salaryDetails ? JSON.parse(salaryDetails) : {},
+      salaryDetails: salary && typeof salary === 'object' && !Array.isArray(salary) ? salary : {},
       aadharCardNumber, drivingLicenseNumber, panCardNumber,
       facebook, twitter, linkedin, instagram, upworkProfile,
     };
@@ -52,22 +92,42 @@ const signup = async (req, res) => {
     userData.role = 'Employee';
 
     // employeeCode is uniquely indexed (non-sparse on existing databases), so a
-    // missing value would collide with any other user that has no code.
-    const lastUser = await User.findOne({ employeeCode: { $regex: /^SOEM/ } }).sort({ employeeCode: -1 });
-    let nextNumber = 1;
-    if (lastUser && lastUser.employeeCode) {
-      const lastNumber = parseInt(lastUser.employeeCode.replace('SOEM', ''), 10);
-      if (Number.isFinite(lastNumber)) nextNumber = lastNumber + 1;
+    // missing value would collide with any other user that has no code. Two
+    // simultaneous signups can still race for the same number, so retry once
+    // with a freshly computed code before giving up.
+    let user;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        user = await new User({ ...userData, employeeCode: await nextEmployeeCode() }).save();
+        break;
+      } catch (err) {
+        const codeClash = err && err.code === 11000 && err.keyPattern && err.keyPattern.employeeCode;
+        if (codeClash && attempt === 0) continue;
+        throw err;
+      }
     }
-    userData.employeeCode = `SOEM${nextNumber.toString().padStart(3, '0')}`;
-
-    const user = new User(userData);
-    await user.save();
 
     return res.status(201).json({ message: 'User created', userId: user._id });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ message: 'Server error', error: err.message });
+    // Never leak driver internals or the raw message to the client.
+    console.error('signup failed:', err && err.message);
+
+    if (err && err.name === 'ValidationError') {
+      return res.status(400).json({
+        message: 'Validation failed',
+        fields: Object.keys(err.errors || {})
+      });
+    }
+
+    if (err && err.code === 11000) {
+      const field = Object.keys(err.keyPattern || err.keyValue || {})[0];
+      const message = field === 'email'
+        ? 'Email already registered'
+        : 'Could not allocate an employee code, please retry';
+      return res.status(409).json({ message });
+    }
+
+    return res.status(500).json({ message: 'Server error' });
   }
 };
 
