@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const mongoose = require('mongoose');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
@@ -83,6 +84,19 @@ app.use('/api/offboarding', require('./routes/offboarding'));
 app.use('/api/quiz', require('./routes/quiz'));
 app.use('/api/location', require('./routes/location'));
 app.use('/api/geofence', require('./routes/geofence'));
+
+// Liveness/readiness probe. Returns 503 while the database is unreachable so a
+// bad MONGO_URI or a missing Atlas allowlist entry is visible from a browser
+// instead of showing up as an opaque 502.
+app.get('/api/health', (req, res) => {
+  const states = { 0: 'disconnected', 1: 'connected', 2: 'connecting', 3: 'disconnecting' };
+  const state = mongoose.connection.readyState;
+  res.status(state === 1 ? 200 : 503).json({
+    ok: state === 1,
+    db: states[state] || 'unknown',
+    uptime: Math.round(process.uptime()),
+  });
+});
 
 // example protected route
 const authenticate = require('./middleware/auth');
