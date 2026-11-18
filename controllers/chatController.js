@@ -1,5 +1,48 @@
+const mongoose = require('mongoose');
 const Message = require('../models/Message');
 const User = require('../models/User');
+
+// Reactions are stored as { userId, emoji, createdAt } sub-documents. The
+// populating options below are shared by every endpoint that returns messages
+// so each reaction can render the reacting employee's name and photo.
+const REACTION_POPULATE = { path: 'reactions.userId', select: 'firstName lastName photo' };
+
+const PICTOGRAPHIC = /\p{Extended_Pictographic}|\p{Emoji_Presentation}|\u200d|\ufe0f/u;
+const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
+
+/**
+ * Accepts a single emoji (or emoji sequence such as a ZWJ family or a
+ * skin-toned hand) and rejects arbitrary text so the reaction store stays
+ * clean. Length is capped so a client cannot push a large string into Mongo.
+ */
+const normalizeEmoji = (value) => {
+  if (typeof value !== 'string') return null;
+  const emoji = value.trim();
+  if (!emoji) return null;
+  if (emoji.length > 16) return null;
+  if (Array.from(emoji).length > 8) return null;
+  if (LETTER_OR_DIGIT.test(emoji)) return null;
+  if (!PICTOGRAPHIC.test(emoji)) return null;
+  return emoji;
+};
+
+const serializeReactions = (reactions = []) =>
+  reactions.map((reaction) => {
+    const user = reaction.userId;
+    const isPopulated = user && typeof user === 'object' && user._id;
+    return {
+      emoji: reaction.emoji,
+      createdAt: reaction.createdAt,
+      user: isPopulated
+        ? {
+            _id: String(user._id),
+            firstName: user.firstName || '',
+            lastName: user.lastName || '',
+            photo: user.photo || null,
+          }
+        : { _id: String(user), firstName: '', lastName: '', photo: null },
+    };
+  });
 
 // Send a message
 const sendMessage = async (req, res) => {
@@ -53,6 +96,7 @@ const sendMessage = async (req, res) => {
       file: messageData.file,
       createdAt: newMessage.createdAt,
       read: false,
+      reactions: [],
     });
 
     res.status(201).json({ message: 'Message sent successfully', data: newMessage });
@@ -76,14 +120,16 @@ const getMessages = async (req, res) => {
         { sender: currentUserId, receiver: userId, isDeletedForEveryone: true },
         { sender: userId, receiver: currentUserId, isDeletedForEveryone: true }
       ]
-    }).populate('sender', 'firstName lastName photo').sort({ createdAt: 1 });
+    }).populate('sender', 'firstName lastName photo').populate(REACTION_POPULATE).sort({ createdAt: 1 });
 
     // Modify messages that are deleted for everyone to show placeholder content
     const modifiedMessages = messages.map(msg => {
       const msgObj = msg.toObject();
+      msgObj.reactions = serializeReactions(msgObj.reactions);
       if (msgObj.isDeletedForEveryone) {
         msgObj.message = 'Deleted by user';
         msgObj.file = null; // Remove file attachment for deleted messages
+        msgObj.reactions = [];
       }
       return msgObj;
     });
@@ -216,6 +262,84 @@ const deleteForEveryone = async (req, res) => {
   }
 };
 
+// Add or remove the current user's reaction on a message (toggle)
+const toggleReaction = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const emoji = normalizeEmoji(req.body?.emoji);
+
+    if (!mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(404).json({ message: 'Message not found' });
+    }
+    if (!emoji) {
+      return res.status(400).json({ message: 'A valid emoji is required' });
+    }
+
+    const message = await Message.findById(messageId).select('sender receiver isDeletedForEveryone');
+    if (!message) {
+      return res.status(404).json({ message: 'Message not found' });
+    }
+
+    const currentUserId = req.user._id;
+    const isSender = message.sender.toString() === currentUserId.toString();
+    const isReceiver = message.receiver.toString() === currentUserId.toString();
+
+    // Only the two people in this conversation may react.
+    if (!isSender && !isReceiver) {
+      return res.status(403).json({ message: 'You are not a participant in this conversation' });
+    }
+    if (message.isDeletedForEveryone) {
+      return res.status(400).json({ message: 'You cannot react to a deleted message' });
+    }
+
+    const scope = { _id: messageId, isDeletedForEveryone: { $ne: true } };
+    let action = 'removed';
+
+    // Remove first. The $elemMatch guard makes this a no-op when the user has
+    // not reacted with this emoji yet, which also makes rapid repeat clicks
+    // idempotent instead of creating duplicate entries.
+    let updated = await Message.findOneAndUpdate(
+      { ...scope, reactions: { $elemMatch: { userId: currentUserId, emoji } } },
+      { $pull: { reactions: { userId: currentUserId, emoji } } },
+      { new: true }
+    );
+
+    if (!updated) {
+      action = 'added';
+      updated = await Message.findOneAndUpdate(
+        { ...scope, reactions: { $not: { $elemMatch: { userId: currentUserId, emoji } } } },
+        { $push: { reactions: { userId: currentUserId, emoji, createdAt: new Date() } } },
+        { new: true }
+      );
+    }
+
+    if (!updated) {
+      return res.status(409).json({ message: 'The reaction could not be saved. Please try again.' });
+    }
+
+    await updated.populate(REACTION_POPULATE);
+    const reactions = serializeReactions(updated.reactions);
+
+    // Both participants receive the update, including the reacting user's own
+    // room so their other signed-in devices stay in sync.
+    const io = req.app.get('io');
+    if (io) {
+      io.to(updated.sender.toString())
+        .to(updated.receiver.toString())
+        .emit('messageReactionUpdated', { messageId: String(updated._id), reactions });
+    }
+
+    res.json({
+      message: action === 'added' ? 'Reaction added' : 'Reaction removed',
+      action,
+      reactions,
+    });
+  } catch (error) {
+    console.error('Error toggling reaction:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
 const searchUsers = async (req, res) => {
   try {
     const { query } = req.query;
@@ -246,4 +370,4 @@ const searchUsers = async (req, res) => {
   }
 };
 
-module.exports = { sendMessage, getMessages, getChatUsers, markAsRead, searchUsers, deleteForMe, deleteForEveryone };
+module.exports = { sendMessage, getMessages, getChatUsers, markAsRead, searchUsers, deleteForMe, deleteForEveryone, toggleReaction };

@@ -19,6 +19,9 @@ router.get('/users', authenticate, authorizeRoles('Employee'), chatController.ge
 // Mark messages as read - Employee and above
 router.put('/read/:userId', authenticate, authorizeRoles('Employee'), chatController.markAsRead);
 
+// React / unreact to a message - Employee and above
+router.post('/react/:messageId', authenticate, authorizeRoles('Employee'), chatController.toggleReaction);
+
 // Search users for starting new chats - Employee and above
 router.get('/search-users', authenticate, authorizeRoles('Employee'), chatController.searchUsers);
 
