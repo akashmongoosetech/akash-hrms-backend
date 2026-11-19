@@ -1,5 +1,76 @@
 const Report = require('../models/Report');
 const User = require('../models/User');
+const Attendance = require('../models/Attendance');
+
+const pad = (value) => String(value).padStart(2, '0');
+
+/** YYYY-MM-DD in the server's local timezone. */
+const localDateKey = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
+
+/** Find the attendance session that belongs to a daily report. */
+const findAttendanceForReport = async (report) => {
+  const employeeId =
+    report.employee && report.employee._id ? report.employee._id : report.employee;
+  const dateKey = report.date;
+
+  const conditions = [];
+  if (dateKey) conditions.push({ dateKey });
+
+  const start = new Date(`${dateKey}T00:00:00`);
+  if (!Number.isNaN(start.getTime())) {
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
+    conditions.push({ punchInTime: { $gte: start, $lt: end } });
+  }
+
+  return Attendance.findOne({
+    employeeId,
+    ...(conditions.length ? { $or: conditions } : {}),
+  }).lean();
+};
+
+/**
+ * Public shape for the report view. Storage paths are intentionally omitted;
+ * the browser streams selfies through the authenticated attendance endpoint.
+ */
+const serializeReportAttendance = (record) => {
+  if (!record) return null;
+
+  const totalMinutes =
+    record.totalWorkingMinutes !== undefined && record.totalWorkingMinutes !== null
+      ? record.totalWorkingMinutes
+      : record.punchOutTime && record.punchInTime
+        ? Math.max(
+            0,
+            Math.round((new Date(record.punchOutTime) - new Date(record.punchInTime)) / 60000)
+          )
+        : null;
+
+  return {
+    id: String(record._id),
+    dateKey: record.dateKey || localDateKey(record.punchInTime),
+    status: record.status || (record.punchOutTime ? 'punched-out' : 'punched-in'),
+    punchInTime: record.punchInTime,
+    punchOutTime: record.punchOutTime || null,
+    totalWorkingMinutes: totalMinutes,
+    punchIn: {
+      time: record.punchInTime,
+      location: record.punchInLocation || null,
+      hasSelfie: !!record.punchInSelfie,
+    },
+    punchOut: record.punchOutTime
+      ? {
+          time: record.punchOutTime,
+          location: record.punchOutLocation || null,
+          hasSelfie: !!record.punchOutSelfie,
+        }
+      : null,
+  };
+};
 
 const createReport = async (req, res) => {
   try {
@@ -111,6 +182,30 @@ const getReports = async (req, res) => {
   }
 };
 
+const getReportAttendance = async (req, res) => {
+  try {
+    const report = await Report.findById(req.params.id).select('employee date');
+
+    if (!report) {
+      return res.status(404).json({ message: 'Report not found' });
+    }
+
+    const employeeId =
+      report.employee && report.employee._id ? report.employee._id : report.employee;
+
+    // Employees may only inspect their own report; managers/HR/admins may view all.
+    if (req.user.role === 'Employee' && String(employeeId) !== String(req.user._id)) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    const attendance = await findAttendanceForReport(report);
+    return res.json({ attendance: serializeReportAttendance(attendance) });
+  } catch (err) {
+    console.error('Error fetching report attendance:', err);
+    return res.status(500).json({ message: 'Server error' });
+  }
+};
+
 const getReportById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -194,4 +289,11 @@ const deleteReport = async (req, res) => {
   }
 };
 
-module.exports = { createReport, getReports, getReportById, updateReport, deleteReport };
+module.exports = {
+  createReport,
+  getReports,
+  getReportById,
+  getReportAttendance,
+  updateReport,
+  deleteReport,
+};

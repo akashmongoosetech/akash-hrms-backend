@@ -98,3 +98,6 @@ coverage/
 # Windows system files
 Thumbs.db
 ehthumbs.db
+
+# Attendance selfies (served only through authenticated API)
+attendance-uploads/

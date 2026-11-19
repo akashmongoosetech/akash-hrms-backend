@@ -13,6 +13,7 @@ const connectDB = require('./config/db');
 const PunchTime = require('./models/PunchTime');
 const Report = require('./models/Report');
 const User = require('./models/User');
+const Attendance = require('./models/Attendance');
 
 const app = express();
 const server = http.createServer(app);
@@ -84,6 +85,7 @@ app.use('/api/offboarding', require('./routes/offboarding'));
 app.use('/api/quiz', require('./routes/quiz'));
 app.use('/api/location', require('./routes/location'));
 app.use('/api/geofence', require('./routes/geofence'));
+app.use('/api/attendance', require('./routes/attendance'));
 
 // Liveness/readiness probe. Returns 503 while the database is unreachable so a
 // bad MONGO_URI or a missing Atlas allowlist entry is visible from a browser
@@ -126,6 +128,13 @@ app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
 
   console.error(`[${req.method} ${req.originalUrl}]`, err && err.message);
+
+  // Explicit HTTP errors raised by controllers (validation, conflicts, authz).
+  if (err && (err.status || err.statusCode)) {
+    return res
+      .status(Number(err.status || err.statusCode) || 400)
+      .json({ message: err.message || 'Request failed' });
+  }
 
   if (err && err.name === 'MulterError') {
     const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400;
@@ -248,6 +257,25 @@ cron.schedule('0 0 * * *', async () => {
       // Emit punch-out event
       const user = await User.findById(punch.employee);
       io.emit('punch-out', { employee: user, punchTime: punch });
+    }
+
+    // Close any attendance sessions left open from previous days so the
+    // attendance module never keeps a dangling "punched-in" record overnight.
+    const openAttendance = await Attendance.find({ status: 'punched-in' });
+    for (const record of openAttendance) {
+      const punchIn = new Date(record.punchInTime);
+      if (punchIn >= now) continue;
+      const dayEnd = new Date(record.date || punchIn);
+      dayEnd.setHours(23, 59, 59, 999);
+      const outTime = dayEnd < now ? dayEnd : now;
+      record.punchOutTime = outTime;
+      record.totalWorkingMinutes = Math.max(
+        0,
+        Math.round((outTime.getTime() - punchIn.getTime()) / 60000)
+      );
+      record.status = 'punched-out';
+      record.autoPunchOut = true;
+      await record.save();
     }
 
     console.log(`Auto-punched out ${punchedInEmployees.length} employees`);
