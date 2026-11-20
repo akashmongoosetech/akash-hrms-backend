@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const Message = require('../models/Message');
 const User = require('../models/User');
+const webpush = require('web-push');
 const { isUserActivelyViewingConversation, isUserOnline } = require('../services/chatPresence');
 
 // Reactions are stored as { userId, emoji, createdAt } sub-documents. The
