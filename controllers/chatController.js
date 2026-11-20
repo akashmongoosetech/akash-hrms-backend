@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const Message = require('../models/Message');
 const User = require('../models/User');
+const { isUserActivelyViewingConversation, isUserOnline } = require('../services/chatPresence');
 
 // Reactions are stored as { userId, emoji, createdAt } sub-documents. The
 // populating options below are shared by every endpoint that returns messages
@@ -65,6 +66,11 @@ const sendMessage = async (req, res) => {
       return res.status(400).json({ message: 'Receiver and message are required if no file is attached' });
     }
 
+    // Validate receiverId is a valid ObjectId
+    if (!mongoose.Types.ObjectId.isValid(receiverId)) {
+      return res.status(400).json({ message: 'Invalid receiver ID format' });
+    }
+
     const receiver = await User.findById(receiverId);
     if (!receiver) {
       return res.status(404).json({ message: 'Receiver not found' });
@@ -92,18 +98,75 @@ const sendMessage = async (req, res) => {
     const newMessage = new Message(messageData);
     await newMessage.save();
 
-    // Emit to receiver via socket
+    // Determine notification behavior based on recipient's presence
+    const receiverIdStr = String(receiverId);
+    const isReceiverOnline = isUserOnline(receiverIdStr);
+
+    // Emit to receiver via socket (always deliver in real-time)
     const io = req.app.get('io');
-    io.to(receiverId.toString()).emit('newMessage', {
+    io.to(receiverIdStr).emit('newMessage', {
       _id: newMessage._id.toString(),
       sender: { _id: senderId.toString(), firstName: req.user.firstName, lastName: req.user.lastName, photo: req.user.photo },
-      receiver: receiverId.toString(),
+      receiver: receiverIdStr,
       message: trimmedMessage,
       file: messageData.file,
       createdAt: newMessage.createdAt,
       read: false,
       reactions: [],
     });
+
+    // Determine if we should also send a persistent notification
+    let shouldSendPersistentNotification = false;
+
+    if (isReceiverOnline) {
+      // Check if receiver is actively viewing the relevant conversation
+      const isViewingConversation = isUserActivelyViewingConversation(receiverIdStr, senderId);
+
+      if (isViewingConversation) {
+        // Recipient is online AND viewing the relevant conversation - no separate notification
+        // The real-time socket delivery is sufficient
+        shouldSendPersistentNotification = false;
+      } else {
+        // Recipient is online but viewing another section or different conversation
+        // Send a persistent in-app notification
+        shouldSendPersistentNotification = true;
+      }
+    } else {
+      // Recipient is offline - persistent notification for later delivery
+      shouldSendPersistentNotification = true;
+    }
+
+    // Send persistent notification if needed
+    if (shouldSendPersistentNotification) {
+      const employee = await User.findById(receiverId);
+      if (employee && employee.pushSubscriptions && employee.pushSubscriptions.length > 0) {
+        const notificationPayload = {
+          title: '💬 New Message',
+          body: `${req.user.firstName}: ${trimmedMessage || ' '}`,
+          icon: '/favicon.ico',
+          badge: '/favicon.ico',
+          url: '/chat',
+          data: {
+            type: 'chat_message',
+            senderId: senderId,
+            messageId: newMessage._id,
+            link: '/chat',
+          },
+        };
+
+        const promises = employee.pushSubscriptions.map(subscription =>
+          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
+            .catch(error => {
+              if (error.statusCode === 410) {
+                User.findByIdAndUpdate(receiverId, {
+                  $pull: { pushSubscriptions: subscription }
+                }).exec();
+              }
+            })
+        );
+        await Promise.all(promises);
+      }
+    }
 
     res.status(201).json({ message: 'Message sent successfully', data: newMessage });
   } catch (error) {
