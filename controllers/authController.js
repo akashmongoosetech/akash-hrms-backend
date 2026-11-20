@@ -30,12 +30,21 @@ const parseSkills = (value) => {
 };
 
 const nextEmployeeCode = async () => {
-  const lastUser = await User.findOne({ employeeCode: { $regex: /^SOEM/ } }).sort({ employeeCode: -1 });
-  let nextNumber = 1;
-  if (lastUser && lastUser.employeeCode) {
-    const lastNumber = parseInt(lastUser.employeeCode.replace('SOEM', ''), 10);
-    if (Number.isFinite(lastNumber)) nextNumber = lastNumber + 1;
-  }
+  // Sort numerically. A plain string sort puts "SOEM999" above "SOEM1000",
+  // which would then keep re-issuing an already used code and block signups.
+  const [result] = await User.aggregate([
+    { $match: { employeeCode: { $regex: /^SOEM\d+$/ } } },
+    {
+      $project: {
+        number: { $toInt: { $substrCP: ['$employeeCode', 4, 24] } },
+      },
+    },
+    { $group: { _id: null, highest: { $max: '$number' } } },
+  ]);
+
+  const nextNumber =
+    result && Number.isFinite(result.highest) ? result.highest + 1 : 1;
+
   return `SOEM${nextNumber.toString().padStart(3, '0')}`;
 };
 
