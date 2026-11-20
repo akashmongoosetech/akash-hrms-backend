@@ -16,8 +16,8 @@ router.post('/', authenticate, authorizeRoles('Admin'), holidayController.create
 // Update holiday - Admin and SuperAdmin only
 router.put('/:id', authenticate, authorizeRoles('Admin'), holidayController.updateHoliday);
 
-// Delete holiday - SuperAdmin only
-router.delete('/:id', authenticate, authorizeRoles('SuperAdmin'), holidayController.deleteHoliday);
+// Delete holiday - Admin and SuperAdmin only
+router.delete('/:id', authenticate, authorizeRoles('Admin'), holidayController.deleteHoliday);
 
 // Test push notifications - Admin only
 router.post('/test-push', authenticate, authorizeRoles('Admin'), holidayController.testPushNotification);

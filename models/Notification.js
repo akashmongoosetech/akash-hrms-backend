@@ -8,7 +8,21 @@ const notificationSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['event_created', 'event_updated', 'event_deleted', 'todo_assigned', 'ticket_assigned', 'ticket_created', 'ticket_updated', 'ticket_deleted', 'holiday_added', 'leave_approved', 'leave_rejected'],
+    enum: [
+      'event_created', 'event_updated', 'event_deleted',
+      'todo_assigned', 'todo_created', 'todo_updated', 'todo_deleted',
+      'ticket_assigned', 'ticket_created', 'ticket_updated', 'ticket_deleted',
+      'holiday_added', 'holiday_created', 'holiday_updated', 'holiday_deleted',
+      'team_created', 'team_manager_assigned', 'team_member_added',
+      'employee_profile_updated',
+      'leave_applied', 'leave_approved', 'leave_rejected', 'leave_status_updated',
+      'project_created', 'project_updated', 'project_deleted',
+      'ticket_progress_updated',
+      'course_created', 'course_updated', 'course_deleted',
+      'quiz_assigned', 'quiz_updated', 'quiz_deleted',
+      'chat_message',
+      'blog_created', 'blog_updated', 'blog_deleted'
+    ],
     required: true
   },
   title: {
@@ -18,6 +32,22 @@ const notificationSchema = new mongoose.Schema({
   message: {
     type: String,
     required: true
+  },
+  // The user who performed the action (never the recipient for self-triggered
+  // events, but kept for display and auditability).
+  actor: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  actorName: {
+    type: String
+  },
+  // Generic relation back to the entity that produced this notification.
+  entityType: {
+    type: String
+  },
+  entityId: {
+    type: mongoose.Schema.Types.ObjectId
   },
   data: {
     type: mongoose.Schema.Types.Mixed

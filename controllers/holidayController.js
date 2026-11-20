@@ -1,7 +1,16 @@
 const Holiday = require('../models/Holiday');
 const User = require('../models/User');
-const { createNotificationsForAllUsers } = require('./notificationController');
+const { notifyRolesExceptActor } = require('./notificationController');
 const webpush = require('web-push');
+
+const formatHolidayDate = (date) => {
+  if (!date) return 'an unscheduled date';
+  return new Date(date).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+};
 
 const getHolidays = async (req, res) => {
   try {
@@ -55,64 +64,28 @@ const createHoliday = async (req, res) => {
     const holiday = new Holiday({ name, date });
     await holiday.save();
 
-    // Create persistent notifications for all users
-    try {
-      await createNotificationsForAllUsers(
-        'holiday_created',
-        'New Holiday Added',
-        `New holiday: ${name} on ${new Date(date).toLocaleDateString()}`,
-        { holidayId: holiday._id, holidayName: name, holidayDate: date }
-      );
-    } catch (notificationError) {
-      console.error('Error creating notifications:', notificationError);
-      // Don't fail the holiday creation if notifications fail
-    }
-
-    // Get all users to send push notifications
-    const allUsers = await User.find({ status: 'Active' });
-
-    const io = req.app.get('io');
-    allUsers.forEach(user => {
-      io.emit(`holiday-notification-${user._id}`, {
-        type: 'new_holiday',
-        message: `New holiday: ${name}`,
-        holiday: holiday
-      });
-    });
-
-    // Send push notifications to all users
-    const notificationPayload = {
-      title: '🎉 New Holiday Added',
-      body: `${name} on ${new Date(date).toLocaleDateString()}`,
-      icon: '/favicon.ico',
-      badge: '/favicon.ico',
-      url: '/holidays',
+    // Notify every employee/admin/super-admin except the person who created it.
+    const actorName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'An administrator';
+    await notifyRolesExceptActor({
+      actor: req.user,
+      type: 'holiday_created',
+      title: 'New Holiday Added',
+      message: `A new holiday, ${name}, has been added by ${actorName}.`,
       data: {
+        action: 'created',
         holidayId: holiday._id,
-        type: 'new_holiday'
-      }
-    };
-
-    // Send push notifications to all subscribed users
-    const pushPromises = allUsers.map(async (user) => {
-      if (user.pushSubscriptions && user.pushSubscriptions.length > 0) {
-        const promises = user.pushSubscriptions.map(subscription =>
-          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
-            .catch(error => {
-              // Remove invalid subscriptions
-              if (error.statusCode === 410) {
-                User.findByIdAndUpdate(user._id, {
-                  $pull: { pushSubscriptions: subscription }
-                }).exec();
-              }
-            })
-        );
-        return Promise.all(promises);
-      }
+        holidayName: holiday.name,
+        holidayDate: holiday.date,
+        actorId: req.user._id,
+        actorName,
+        link: '/holidays',
+      },
+      entityType: 'Holiday',
+      entityId: holiday._id,
+      io: req.app.get('io'),
+      pushTitle: '🎉 New Holiday Added',
+      pushUrl: '/holidays',
     });
-
-    // Execute all push notification promises
-    await Promise.all(pushPromises);
 
     res.status(201).json({ message: 'Holiday created successfully', holiday });
   } catch (err) {
@@ -129,65 +102,27 @@ const updateHoliday = async (req, res) => {
     const holiday = await Holiday.findByIdAndUpdate(id, updates, { new: true, runValidators: true });
     if (!holiday) return res.status(404).json({ message: 'Holiday not found' });
 
-    // Create persistent notifications for all users
-    try {
-      await createNotificationsForAllUsers(
-        'holiday_updated',
-        'Holiday Updated',
-        `Holiday "${holiday.name}" has been updated`,
-        { holidayId: holiday._id, holidayName: holiday.name, holidayDate: holiday.date }
-      );
-    } catch (notificationError) {
-      console.error('Error creating notifications:', notificationError);
-      // Don't fail the holiday update if notifications fail
-    }
-
-    // Get all users to send push notifications
-    const allUsers = await User.find({ status: 'Active' });
-
-    const io = req.app.get('io');
-    allUsers.forEach(user => {
-      io.emit(`holiday-notification-${user._id}`, {
-        type: 'updated_holiday',
-        message: `Holiday updated: ${holiday.name}`,
-        holiday: holiday
-      });
-    });
-
-    // Send push notifications to all users
-    const notificationPayload = {
-      title: '🗓️ Holiday Updated',
-      body: `${holiday.name} has been updated`,
-      icon: '/favicon.ico',
-      badge: '/favicon.ico',
-      url: '/holidays',
+    const actorName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'An administrator';
+    await notifyRolesExceptActor({
+      actor: req.user,
+      type: 'holiday_updated',
+      title: 'Holiday Updated',
+      message: `${actorName} has updated the holiday ${holiday.name} (${formatHolidayDate(holiday.date)}).`,
       data: {
+        action: 'updated',
         holidayId: holiday._id,
-        type: 'updated_holiday'
-      }
-    };
-
-    // Send push notifications to all subscribed users
-    const pushPromises = allUsers.map(async (user) => {
-      if (user.pushSubscriptions && user.pushSubscriptions.length > 0) {
-        const promises = user.pushSubscriptions.map(subscription =>
-          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
-            .catch(error => {
-              console.error(`Error sending push notification to ${user.email}:`, error);
-              // Remove invalid subscriptions
-              if (error.statusCode === 410) {
-                User.findByIdAndUpdate(user._id, {
-                  $pull: { pushSubscriptions: subscription }
-                }).exec();
-              }
-            })
-        );
-        return Promise.all(promises);
-      }
+        holidayName: holiday.name,
+        holidayDate: holiday.date,
+        actorId: req.user._id,
+        actorName,
+        link: '/holidays',
+      },
+      entityType: 'Holiday',
+      entityId: holiday._id,
+      io: req.app.get('io'),
+      pushTitle: '🗓️ Holiday Updated',
+      pushUrl: '/holidays',
     });
-
-    // Execute all push notification promises
-    await Promise.all(pushPromises);
 
     res.json({ message: 'Holiday updated successfully', holiday });
   } catch (err) {
@@ -203,65 +138,27 @@ const deleteHoliday = async (req, res) => {
     const holiday = await Holiday.findByIdAndDelete(id);
     if (!holiday) return res.status(404).json({ message: 'Holiday not found' });
 
-    // Create persistent notifications for all users
-    try {
-      await createNotificationsForAllUsers(
-        'holiday_deleted',
-        'Holiday Removed',
-        `Holiday "${holiday.name}" has been deleted`,
-        { holidayId: holiday._id, holidayName: holiday.name, holidayDate: holiday.date }
-      );
-    } catch (notificationError) {
-      console.error('Error creating notifications:', notificationError);
-      // Don't fail the holiday deletion if notifications fail
-    }
-
-    // Get all users to send push notifications
-    const allUsers = await User.find({ status: 'Active' });
-
-    const io = req.app.get('io');
-    allUsers.forEach(user => {
-      io.emit(`holiday-notification-${user._id}`, {
-        type: 'deleted_holiday',
-        message: `Holiday deleted: ${holiday.name}`,
-        holiday: holiday
-      });
-    });
-
-    // Send push notifications to all users
-    const notificationPayload = {
-      title: '⚠️ Holiday Removed',
-      body: `${holiday.name} has been deleted`,
-      icon: '/favicon.ico',
-      badge: '/favicon.ico',
-      url: '/holidays',
+    const actorName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'An administrator';
+    await notifyRolesExceptActor({
+      actor: req.user,
+      type: 'holiday_deleted',
+      title: 'Holiday Removed',
+      message: `${actorName} has deleted the holiday ${holiday.name}.`,
       data: {
+        action: 'deleted',
         holidayId: holiday._id,
-        type: 'deleted_holiday'
-      }
-    };
-
-    // Send push notifications to all subscribed users
-    const pushPromises = allUsers.map(async (user) => {
-      if (user.pushSubscriptions && user.pushSubscriptions.length > 0) {
-        const promises = user.pushSubscriptions.map(subscription =>
-          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
-            .catch(error => {
-              console.error(`Error sending push notification to ${user.email}:`, error);
-              // Remove invalid subscriptions
-              if (error.statusCode === 410) {
-                User.findByIdAndUpdate(user._id, {
-                  $pull: { pushSubscriptions: subscription }
-                }).exec();
-              }
-            })
-        );
-        return Promise.all(promises);
-      }
+        holidayName: holiday.name,
+        holidayDate: holiday.date,
+        actorId: req.user._id,
+        actorName,
+        link: '/holidays',
+      },
+      entityType: 'Holiday',
+      entityId: holiday._id,
+      io: req.app.get('io'),
+      pushTitle: '⚠️ Holiday Removed',
+      pushUrl: '/holidays',
     });
-
-    // Execute all push notification promises
-    await Promise.all(pushPromises);
 
     res.json({ message: 'Holiday deleted successfully' });
   } catch (err) {

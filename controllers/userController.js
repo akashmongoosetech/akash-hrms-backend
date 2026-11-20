@@ -2,8 +2,159 @@ const bcrypt = require('bcryptjs');
 const nodemailer = require('nodemailer');
 const mongoose = require('mongoose');
 const User = require('../models/User');
+const Department = require('../models/Department');
 const DeletedEmployee = require('../models/DeletedEmployee');
+const { notifyUsers } = require('./notificationController');
 const webpush = require('web-push');
+
+// Human-readable labels for the profile notification. Any field that is not in
+// this map still gets a generated label, so newly added editable fields are
+// covered without code changes.
+const PROFILE_FIELD_LABELS = {
+  firstName: 'Name',
+  lastName: 'Name',
+  photo: 'Profile Picture',
+  email: 'Email Address',
+  mobile1: 'Mobile Number',
+  mobile2: 'Alternate Mobile Number',
+  dob: 'Date of Birth',
+  gender: 'Gender',
+  address1: 'Address',
+  address2: 'Address',
+  department: 'Department',
+  role: 'Role',
+  salary: 'Salary',
+  salaryDetails: 'Salary Details',
+  joiningDate: 'Joining Date',
+  status: 'Employment Status',
+  bankAccountName: 'Bank Account Name',
+  bankAccountNo: 'Bank Account Number',
+  bankName: 'Bank Name',
+  ifscCode: 'IFSC Code',
+  bankAddress: 'Bank Address',
+  aadharCardNumber: 'Aadhaar Card Number',
+  panCardNumber: 'PAN Card Number',
+  drivingLicenseNumber: 'Driving License Number',
+  emergencyContact1: 'Emergency Contact',
+  emergencyContact2: 'Emergency Contact',
+  emergencyContact3: 'Emergency Contact',
+  employeeCode: 'Employee Code',
+  leaveBalance: 'Leave Balance',
+  skillsFrontend: 'Frontend Skills',
+  skillsBackend: 'Backend Skills',
+  facebook: 'Facebook Profile',
+  twitter: 'Twitter Profile',
+  linkedin: 'LinkedIn Profile',
+  instagram: 'Instagram Profile',
+  upworkProfile: 'Upwork Profile',
+};
+
+// Values of these fields are never written into notification text/metadata.
+const SENSITIVE_PROFILE_FIELDS = new Set([
+  'password', 'salary', 'salaryDetails', 'bankAccountName', 'bankAccountNo',
+  'bankName', 'ifscCode', 'bankAddress', 'aadharCardNumber', 'panCardNumber',
+  'drivingLicenseNumber',
+]);
+
+// Structured fields are identified but their raw JSON is not shown.
+const OBJECT_PROFILE_FIELDS = new Set([
+  'department', 'leaveBalance', 'salaryDetails', 'skillsFrontend', 'skillsBackend',
+]);
+
+const profileFieldLabel = (field) =>
+  PROFILE_FIELD_LABELS[field]
+  || field.replace(/([A-Z])/g, ' $1').replace(/^./, (char) => char.toUpperCase()).trim();
+
+const sortKeysDeep = (value) => {
+  if (Array.isArray(value)) return value.map(sortKeysDeep);
+  if (value && typeof value === 'object') {
+    if (value._bsontype === 'ObjectId' || value instanceof mongoose.Types.ObjectId) return String(value);
+    return Object.keys(value).sort().reduce((acc, key) => {
+      acc[key] = sortKeysDeep(value[key]);
+      return acc;
+    }, {});
+  }
+  return value;
+};
+
+const comparableValue = (field, value) => {
+  if (value === undefined || value === null || value === '') return '';
+  if (field === 'dob' || field === 'joiningDate') {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10);
+  }
+  if (field === 'salary') {
+    const amount = Number(value);
+    return Number.isNaN(amount) ? '' : String(amount);
+  }
+  if (typeof value === 'object') {
+    const plain = typeof value.toObject === 'function' ? value.toObject() : value;
+    try {
+      return JSON.stringify(sortKeysDeep(plain));
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value).trim();
+};
+
+const displayProfileValue = (field, value, departmentNames) => {
+  if (value === undefined || value === null || value === '') return 'Not set';
+  if (field === 'department') {
+    return departmentNames.get(String(value)) || 'another department';
+  }
+  if (field === 'dob' || field === 'joiningDate') {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime())
+      ? String(value)
+      : date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  }
+  return String(value);
+};
+
+const joinLabels = (labels) => {
+  if (labels.length === 0) return '';
+  if (labels.length === 1) return labels[0];
+  return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+};
+
+const buildProfileUpdateMessage = async (actorName, fields, before, updates) => {
+  let departmentNames = new Map();
+  if (fields.includes('department')) {
+    const departmentIds = [...new Set(
+      [before.department, updates.department].filter(Boolean).map((id) => String(id))
+    )];
+    const departments = await Department.find({ _id: { $in: departmentIds } }).select('name');
+    departmentNames = new Map(departments.map((department) => [String(department._id), department.name]));
+  }
+
+  if (fields.length === 1 && fields[0] === 'photo') {
+    return `${actorName} has updated your profile picture.`;
+  }
+
+  const nameFields = fields.filter((field) => field === 'firstName' || field === 'lastName');
+  const otherFields = fields.filter((field) => field !== 'firstName' && field !== 'lastName');
+
+  if (nameFields.length && otherFields.length === 0) {
+    const oldName = `${before.firstName || ''} ${before.lastName || ''}`.trim();
+    const newName = `${updates.firstName ?? before.firstName ?? ''} ${updates.lastName ?? before.lastName ?? ''}`.trim();
+    return `${actorName} has updated your profile. Your Name was changed from ${oldName} to ${newName}.`;
+  }
+
+  if (fields.length === 1) {
+    const field = fields[0];
+    const label = profileFieldLabel(field);
+    if (SENSITIVE_PROFILE_FIELDS.has(field) || OBJECT_PROFILE_FIELDS.has(field)) {
+      return `${actorName} has updated your ${label}.`;
+    }
+    const oldValue = displayProfileValue(field, before.get(field), departmentNames);
+    const newValue = displayProfileValue(field, updates[field], departmentNames);
+    return `${actorName} has updated your ${label} from ${oldValue} to ${newValue}.`;
+  }
+
+  const labels = [...new Set(fields.map(profileFieldLabel))];
+  return `${actorName} has updated your profile. Modified fields: ${joinLabels(labels)}.`;
+};
 
 // Directory-level projection: safe for any authenticated employee to read.
 const DIRECTORY_FIELDS = [
@@ -340,8 +491,47 @@ const updateUser = async (req, res) => {
       return res.status(400).json({ message: 'Invalid status value' });
     }
 
+    // Detect real changes before writing. Comparing the incoming payload with
+    // the stored document means unchanged fields never generate a notification
+    // and newly added editable fields are covered automatically.
+    const modifiedFields = Object.keys(updates).filter((field) => {
+      if (field === 'password') return false;
+      const incoming = updates[field];
+      if (incoming === undefined) return false;
+      return comparableValue(field, target.get(field)) !== comparableValue(field, incoming);
+    });
+
     const user = await User.findByIdAndUpdate(id, updates, { new: true, runValidators: true }).select('-password');
     if (!user) return res.status(404).json({ message: 'User not found' });
+
+    // Only a different user's profile, edited by an Admin/SuperAdmin, produces a
+    // notification. Notification delivery never fails the update itself.
+    if (!isOwnProfile && isAdminOrSuperAdmin && modifiedFields.length > 0) {
+      const actorName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'An administrator';
+      const message = await buildProfileUpdateMessage(actorName, modifiedFields, target, updates);
+
+      await notifyUsers({
+        recipients: [user._id],
+        type: 'employee_profile_updated',
+        title: 'Your Profile Was Updated',
+        message,
+        data: {
+          action: 'profile_updated',
+          changedFields: modifiedFields.map((field) => ({
+            field,
+            label: profileFieldLabel(field),
+          })),
+          actorId: req.user._id,
+          actorName,
+          link: '/profile',
+        },
+        actor: req.user,
+        entityType: 'User',
+        entityId: user._id,
+        io: req.app.get('io'),
+        pushTitle: 'Your Profile Was Updated',
+      });
+    }
 
     res.json({ message: 'User updated successfully', user });
   } catch (err) {
