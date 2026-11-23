@@ -6,7 +6,8 @@ const {
   getLocationHistory,
   getCurrentLocation,
   getMyLocation,
-  getLocationStatus
+  getLocationStatus,
+  getEmployeesForTracking
 } = require('../controllers/locationController');
 const authenticate = require('../middleware/auth');
 const authorizeRoles = require('../middleware/authorize');
@@ -15,10 +16,13 @@ const authorizeRoles = require('../middleware/authorize');
 router.post('/update', authenticate, updateLocation);
 router.get('/my-location', authenticate, getMyLocation);
 
-// Admin routes - require authentication and admin role
-router.get('/live', authenticate, authorizeRoles('Admin'), getLiveLocations);
-router.get('/history/:employeeId', authenticate, authorizeRoles('Admin'), getLocationHistory);
-router.get('/current/:employeeId', authenticate, authorizeRoles('Admin'), getCurrentLocation);
-router.get('/status/:employeeId', authenticate, authorizeRoles('Admin'), getLocationStatus);
+// Admin routes - require authentication and admin or superadmin role
+router.get('/live', authenticate, authorizeRoles(['Admin', 'SuperAdmin']), getLiveLocations);
+router.get('/history/:employeeId', authenticate, authorizeRoles(['Admin', 'SuperAdmin']), getLocationHistory);
+router.get('/current/:employeeId', authenticate, authorizeRoles(['Admin', 'SuperAdmin']), getCurrentLocation);
+router.get('/status/:employeeId', authenticate, authorizeRoles(['Admin', 'SuperAdmin']), getLocationStatus);
+
+// Employee list for tracking dropdown - Admin and SuperAdmin
+router.get('/employees', authenticate, authorizeRoles(['Admin', 'SuperAdmin']), getEmployeesForTracking);
 
 module.exports = router;

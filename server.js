@@ -14,6 +14,14 @@ const PunchTime = require('./models/PunchTime');
 const Report = require('./models/Report');
 const User = require('./models/User');
 const Attendance = require('./models/Attendance');
+const {
+  registerSocket,
+  updateSocketPresence,
+  heartbeat: recordHeartbeat,
+  removeSocket,
+  sweepStaleSessions,
+  normalizeConversationId,
+} = require('./services/chatPresence');
 
 const app = express();
 const server = http.createServer(app);
@@ -193,19 +201,125 @@ io.use(async (socket, next) => {
 });
 
 // Socket.io connection
+//
+// Every event below is keyed by the authenticated JWT (`socket.user`). Client
+// supplied userId / role values are never trusted. Presence is per socket, so
+// one user can have many tabs and devices with independent sections and active
+// conversations.
 io.on('connection', (socket) => {
   const room = socket.user.id;
+  const role = socket.user.role;
+  const deviceSessionId = socket.handshake.auth?.deviceSessionId || null;
+
   socket.join(room);
+
+  // Presence starts with no section so an online-but-idle client is treated as
+  // "not viewing a conversation" until it reports its location.
+  registerSocket({
+    userId: room,
+    role,
+    socketId: socket.id,
+    deviceSessionId,
+  });
+
+  const safePayload = (payload) =>
+    payload && typeof payload === 'object' ? payload : {};
+
+  const applyPresenceUpdate = (payload = {}) => {
+    const data = safePayload(payload);
+    const updates = {};
+    if (Object.prototype.hasOwnProperty.call(data, 'section')) {
+      updates.section = data.section;
+    }
+    if (Object.prototype.hasOwnProperty.call(data, 'conversationId')) {
+      updates.conversationId = data.conversationId;
+    }
+    if (typeof data.visible === 'boolean') {
+      updates.visible = data.visible;
+    }
+    return updateSocketPresence(room, socket.id, updates);
+  };
+
+  // Generic presence event. Kept under the original `update-presence` name for
+  // backwards compatibility and exposed under the documented `user:*` names.
+  socket.on('update-presence', applyPresenceUpdate);
+  socket.on('user:presence:update', applyPresenceUpdate);
+
+  // Navigation between HRMS sections. The section is free-form (dashboard,
+  // attendance, projects, ...) but is always normalised server-side.
+  socket.on('user:section:update', (payload = {}) => {
+    const data = safePayload(payload);
+    const section = typeof data.section === 'string' ? data.section : null;
+    updateSocketPresence(room, socket.id, {
+      section,
+      // A non-chat section can never keep a conversation open.
+      conversationId: section === 'chat' ? data.conversationId : null,
+      ...(typeof data.visible === 'boolean' ? { visible: data.visible } : {}),
+    });
+  });
+
+  // The exact conversation currently open. The id is validated as an ObjectId
+  // and must not be the user themselves.
+  socket.on('chat:conversation:open', (payload = {}) => {
+    const data = safePayload(payload);
+    const conversationId = normalizeConversationId(data.conversationId);
+    if (!conversationId || conversationId === room) return;
+
+    updateSocketPresence(room, socket.id, {
+      section: 'chat',
+      conversationId,
+      visible: true,
+    });
+  });
+
+  // Closing a conversation only clears the active conversation. The current
+  // section is intentionally preserved: when the user navigates from Chat to
+  // Dashboard, this cleanup must not overwrite the newer `dashboard` section.
+  socket.on('chat:conversation:close', () => {
+    updateSocketPresence(room, socket.id, { conversationId: null });
+  });
+
+  // Heartbeats keep a session online. They may also carry visibility so a
+  // hidden tab stops counting as "actively viewing" without dropping offline.
+  socket.on('user:heartbeat', (payload = {}) => {
+    const data = safePayload(payload);
+    const updates = {};
+    if (typeof data.visible === 'boolean') updates.visible = data.visible;
+    recordHeartbeat(room, socket.id, updates);
+    socket.emit('user:heartbeat:ack', { at: Date.now() });
+  });
+
+  // Explicit offline notification before logout. The subsequent disconnect is
+  // idempotent.
+  socket.on('user:presence:offline', () => {
+    removeSocket(room, socket.id);
+  });
 
   // Legacy clients still emit 'join'; only their own room is accepted.
   socket.on('join', (userId) => {
     if (String(userId) === room) socket.join(room);
   });
 
+  // Admins and SuperAdmins can join the tracking room to receive location updates
+  socket.on('tracking:join', () => {
+    if (role === 'Admin' || role === 'SuperAdmin') {
+      socket.join('tracking-admins');
+      console.log(`Admin ${room} joined tracking room`);
+    }
+  });
+
   socket.on('disconnect', () => {
-    // no-op
+    removeSocket(room, socket.id);
   });
 });
+
+// Reap sockets that stopped heartbeating (e.g. a laptop that went to sleep
+// without a clean disconnect). Runs often enough that stale "viewing" state can
+// never suppress notifications indefinitely.
+const presenceSweep = setInterval(() => {
+  sweepStaleSessions();
+}, 30 * 1000);
+if (typeof presenceSweep.unref === 'function') presenceSweep.unref();
 
 // Make io accessible to routes
 app.set('io', io);

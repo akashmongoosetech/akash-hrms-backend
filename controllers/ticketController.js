@@ -1,7 +1,10 @@
 const Ticket = require('../models/Ticket');
-const User = require('../models/User');
-const { createNotificationsForAllUsers } = require('./notificationController');
-const webpush = require('web-push');
+const {
+  notifySpecificUser,
+  notifyAdminsSuperAdminsExceptActor,
+} = require('./notificationController');
+
+const PRIVILEGED_ROLES = ['Admin', 'SuperAdmin'];
 
 const getTickets = async (req, res) => {
   try {
@@ -82,65 +85,30 @@ const createTicket = async (req, res) => {
     // Populate ticket with employee data
     await ticket.populate('employee', 'firstName lastName email photo');
 
-    // Create persistent notifications for all users
-    try {
-      await createNotificationsForAllUsers(
-        'ticket_created',
-        'New Ticket Assigned',
-        `New ticket "${title}" assigned to ${ticket.employee.firstName} ${ticket.employee.lastName}`,
-        { ticketId: ticket._id, ticketTitle: title, employeeName: `${ticket.employee.firstName} ${ticket.employee.lastName}` }
-      );
-    } catch (notificationError) {
-      console.error('Error creating notifications:', notificationError);
-      // Don't fail the ticket creation if notifications fail
-    }
-
-    // Get all users to send push notifications
-    const allUsers = await User.find({ status: 'Active' });
-
-    // Emit real-time notification to all users
-    const io = req.app.get('io');
-    allUsers.forEach(user => {
-      io.emit(`ticket-notification-${user._id}`, {
-        type: 'new_ticket',
-        message: `New ticket assigned: ${title}`,
-        ticket: ticket
-      });
-    });
-
-    // Send push notifications to all users
-    const notificationPayload = {
-      title: '🎫 New Ticket Assigned',
-      body: `${title} assigned to ${ticket.employee.firstName} ${ticket.employee.lastName}`,
-      icon: '/favicon.ico',
-      badge: '/favicon.ico',
-      url: '/tickets',
+    // Only the employee the ticket belongs to is notified.
+    const actorName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'An administrator';
+    await notifySpecificUser({
+      userId: ticket.employee?._id || ticket.employee,
+      actor: req.user,
+      type: 'ticket_created',
+      title: 'New Ticket Assigned',
+      message: `${actorName} has created a new ticket for you: ${ticket.title}.`,
       data: {
+        action: 'created',
         ticketId: ticket._id,
-        type: 'new_ticket'
-      }
-    };
-
-    // Send push notifications to all subscribed users
-    const pushPromises = allUsers.map(async (user) => {
-      if (user.pushSubscriptions && user.pushSubscriptions.length > 0) {
-        const promises = user.pushSubscriptions.map(subscription =>
-          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
-            .catch(error => {
-              // Remove invalid subscriptions
-              if (error.statusCode === 410) {
-                User.findByIdAndUpdate(user._id, {
-                  $pull: { pushSubscriptions: subscription }
-                }).exec();
-              }
-            })
-        );
-        return Promise.all(promises);
-      }
+        ticketTitle: ticket.title,
+        priority: ticket.priority,
+        dueDate: ticket.dueDate,
+        actorId: req.user._id,
+        actorName,
+        link: `/tickets/view/${ticket._id}`,
+      },
+      entityType: 'Ticket',
+      entityId: ticket._id,
+      io: req.app.get('io'),
+      pushTitle: '🎫 New Ticket Assigned',
+      pushUrl: `/tickets/view/${ticket._id}`,
     });
-
-    // Execute all push notification promises
-    await Promise.all(pushPromises);
 
     res.status(201).json({ message: 'Ticket created successfully', ticket });
   } catch (err) {
@@ -156,6 +124,15 @@ const updateTicket = async (req, res) => {
 
     const ticket = await Ticket.findById(id);
     if (!ticket) return res.status(404).json({ message: 'Ticket not found' });
+
+    const previousProgress = ticket.currentProgress;
+    const previousEmployeeId = String(ticket.employee);
+    const previousSnapshot = {
+      title: ticket.title,
+      description: ticket.description,
+      priority: ticket.priority,
+      dueDate: ticket.dueDate ? new Date(ticket.dueDate).toISOString() : null,
+    };
 
     // Check if user is Employee and not the assigned employee
     if (req.user.role === 'Employee' && ticket.employee.toString() !== req.user._id.toString()) {
@@ -221,65 +198,91 @@ const updateTicket = async (req, res) => {
       { path: 'progress.updatedBy', select: 'firstName lastName role' }
     ]);
 
-    // Create persistent notifications for all users
-    try {
-      await createNotificationsForAllUsers(
-        'ticket_updated',
-        'Ticket Updated',
-        `Ticket "${ticket.title}" has been updated`,
-        { ticketId: ticket._id, ticketTitle: ticket.title }
-      );
-    } catch (notificationError) {
-      console.error('Error creating notifications:', notificationError);
-      // Don't fail the ticket update if notifications fail
-    }
-
-    // Get all users to send push notifications
-    const allUsers = await User.find({ status: 'Active' });
-
-    // Emit real-time notification to all users
-    const io = req.app.get('io');
-    allUsers.forEach(user => {
-      io.emit(`ticket-notification-${user._id}`, {
-        type: 'updated_ticket',
-        message: `Ticket updated: ${ticket.title}`,
-        ticket: ticket
-      });
-    });
-
-    // Send push notifications to all users
-    const notificationPayload = {
-      title: '📈 Ticket Updated',
-      body: `Ticket "${ticket.title}" has been updated`,
-      icon: '/favicon.ico',
-      badge: '/favicon.ico',
-      url: '/tickets',
-      data: {
-        ticketId: ticket._id,
-        type: 'updated_ticket'
-      }
+    const employeeId = ticket.employee?._id || ticket.employee;
+    const actorName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'An administrator';
+    const progressChanged = Number(previousProgress) !== Number(ticket.currentProgress);
+    const isPrivilegedActor = PRIVILEGED_ROLES.includes(req.user.role);
+    const ticketData = {
+      ticketId: ticket._id,
+      ticketTitle: ticket.title,
+      previousProgress,
+      currentProgress: ticket.currentProgress,
+      actorId: req.user._id,
+      actorName,
+      link: `/tickets/view/${ticket._id}`,
     };
 
-    // Send push notifications to all subscribed users
-    const pushPromises = allUsers.map(async (user) => {
-      if (user.pushSubscriptions && user.pushSubscriptions.length > 0) {
-        const promises = user.pushSubscriptions.map(subscription =>
-          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
-            .catch(error => {
-              // Remove invalid subscriptions
-              if (error.statusCode === 410) {
-                User.findByIdAndUpdate(user._id, {
-                  $pull: { pushSubscriptions: subscription }
-                }).exec();
-              }
-            })
-        );
-        return Promise.all(promises);
+    if (progressChanged) {
+      if (isPrivilegedActor) {
+        // Admin/SuperAdmin progress update -> only the assigned employee.
+        await notifySpecificUser({
+          userId: employeeId,
+          actor: req.user,
+          type: 'ticket_progress_updated',
+          title: 'Ticket Progress Updated',
+          message: `${actorName} has updated the progress of your ticket ${ticket.title} to ${ticket.currentProgress}%.`,
+          data: { ...ticketData, action: 'progress_updated' },
+          entityType: 'Ticket',
+          entityId: ticket._id,
+          io: req.app.get('io'),
+          pushTitle: '📈 Ticket Progress Updated',
+          pushUrl: `/tickets/view/${ticket._id}`,
+        });
+      } else {
+        // Employee progress update -> all Admins and SuperAdmins.
+        await notifyAdminsSuperAdminsExceptActor({
+          actor: req.user,
+          type: 'ticket_progress_updated',
+          title: 'Ticket Progress Updated',
+          message: `${actorName} has updated the progress of ticket ${ticket.title} to ${ticket.currentProgress}%.`,
+          data: {
+            ...ticketData,
+            action: 'progress_updated',
+            employeeId: req.user._id,
+            employeeName: actorName,
+          },
+          entityType: 'Ticket',
+          entityId: ticket._id,
+          io: req.app.get('io'),
+          pushTitle: '📈 Ticket Progress Updated',
+          pushUrl: `/tickets/view/${ticket._id}`,
+        });
       }
-    });
+    } else if (isPrivilegedActor) {
+      // Admin/SuperAdmin edits (title, description, priority, due date or
+      // assignment) notify the assigned employee. Progress-only flows are
+      // handled above so a single action never produces two notifications.
+      const nextSnapshot = {
+        title: ticket.title,
+        description: ticket.description,
+        priority: ticket.priority,
+        dueDate: ticket.dueDate ? new Date(ticket.dueDate).toISOString() : null,
+      };
+      const detailsChanged =
+        Object.keys(nextSnapshot).some((key) => nextSnapshot[key] !== previousSnapshot[key]) ||
+        String(ticket.employee?._id || ticket.employee) !== previousEmployeeId;
 
-    // Execute all push notification promises
-    await Promise.all(pushPromises);
+      if (detailsChanged) {
+        await notifySpecificUser({
+          userId: employeeId,
+          actor: req.user,
+          type: 'ticket_updated',
+          title: 'Ticket Updated',
+          message: `${actorName} has updated your ticket: ${ticket.title}.`,
+          data: {
+            ...ticketData,
+            action: 'updated',
+            priority: ticket.priority,
+            dueDate: ticket.dueDate,
+          },
+          entityType: 'Ticket',
+          entityId: ticket._id,
+          io: req.app.get('io'),
+          pushTitle: '📝 Ticket Updated',
+          pushUrl: `/tickets/view/${ticket._id}`,
+        });
+      }
+    }
 
     res.json({ message: 'Ticket updated successfully', ticket });
   } catch (err) {
@@ -295,65 +298,28 @@ const deleteTicket = async (req, res) => {
     const ticket = await Ticket.findByIdAndDelete(id);
     if (!ticket) return res.status(404).json({ message: 'Ticket not found' });
 
-    // Create persistent notifications for all users
-    try {
-      await createNotificationsForAllUsers(
-        'ticket_deleted',
-        'Ticket Removed',
-        `Ticket "${ticket.title}" has been deleted`,
-        { ticketId: id, ticketTitle: ticket.title }
-      );
-    } catch (notificationError) {
-      console.error('Error creating notifications:', notificationError);
-      // Don't fail the ticket deletion if notifications fail
-    }
-
-    // Get all users to send push notifications
-    const allUsers = await User.find({ status: 'Active' });
-
-    // Emit real-time notification to all users
-    const io = req.app.get('io');
-    allUsers.forEach(user => {
-      io.emit(`ticket-notification-${user._id}`, {
-        type: 'deleted_ticket',
-        message: `Ticket deleted: ${ticket.title}`,
-        ticket: { _id: id, title: ticket.title }
-      });
-    });
-
-    // Send push notifications to all users
-    const notificationPayload = {
-      title: '🗑️ Ticket Removed',
-      body: `Ticket "${ticket.title}" has been deleted`,
-      icon: '/favicon.ico',
-      badge: '/favicon.ico',
-      url: '/tickets',
+    // Only the employee the ticket belonged to is notified.
+    const actorName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'An administrator';
+    await notifySpecificUser({
+      userId: ticket.employee,
+      actor: req.user,
+      type: 'ticket_deleted',
+      title: 'Ticket Deleted',
+      message: `${actorName} has deleted your ticket: ${ticket.title}.`,
       data: {
-        ticketId: id,
-        type: 'deleted_ticket'
-      }
-    };
-
-    // Send push notifications to all subscribed users
-    const pushPromises = allUsers.map(async (user) => {
-      if (user.pushSubscriptions && user.pushSubscriptions.length > 0) {
-        const promises = user.pushSubscriptions.map(subscription =>
-          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
-            .catch(error => {
-              // Remove invalid subscriptions
-              if (error.statusCode === 410) {
-                User.findByIdAndUpdate(user._id, {
-                  $pull: { pushSubscriptions: subscription }
-                }).exec();
-              }
-            })
-        );
-        return Promise.all(promises);
-      }
+        action: 'deleted',
+        ticketId: ticket._id,
+        ticketTitle: ticket.title,
+        actorId: req.user._id,
+        actorName,
+        link: '/tickets',
+      },
+      entityType: 'Ticket',
+      entityId: ticket._id,
+      io: req.app.get('io'),
+      pushTitle: '🗑️ Ticket Removed',
+      pushUrl: '/tickets',
     });
-
-    // Execute all push notification promises
-    await Promise.all(pushPromises);
 
     res.json({ message: 'Ticket deleted successfully' });
   } catch (err) {

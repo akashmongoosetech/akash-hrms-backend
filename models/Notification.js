@@ -58,10 +58,20 @@ const notificationSchema = new mongoose.Schema({
   },
   readAt: {
     type: Date
+  },
+  // Optional idempotency key. Chat notifications use
+  // `chat:<messageId>:<recipientId>` so a retried request (or a reconnect) can
+  // never create a second record for the same message.
+  dedupeKey: {
+    type: String,
+    unique: true,
+    sparse: true
   }
 }, { timestamps: true });
 
 // Index for efficient queries
 notificationSchema.index({ user: 1, read: 1, createdAt: -1 });
+// Conversation-scoped lookups used when a chat is opened / marked read.
+notificationSchema.index({ user: 1, type: 1, 'data.senderId': 1, read: 1 });
 
 module.exports = mongoose.model('Notification', notificationSchema);

@@ -16,6 +16,12 @@ router.get('/messages/:userId', authenticate, authorizeRoles('Employee'), chatCo
 // Get list of chat users - Employee and above
 router.get('/users', authenticate, authorizeRoles('Employee'), chatController.getChatUsers);
 
+// Authoritative unread chat counters - Employee and above
+router.get('/unread-count', authenticate, authorizeRoles('Employee'), chatController.getUnreadChatCount);
+
+// Resolve a single chat participant (notification deep-link fallback)
+router.get('/user/:userId', authenticate, authorizeRoles('Employee'), chatController.getChatUser);
+
 // Mark messages as read - Employee and above
 router.put('/read/:userId', authenticate, authorizeRoles('Employee'), chatController.markAsRead);
 
@@ -30,5 +36,11 @@ router.delete('/delete-for-me/:messageId', authenticate, authorizeRoles('Employe
 
 // Delete message for everyone - Employee and above
 router.delete('/delete-for-everyone/:messageId', authenticate, authorizeRoles('Employee'), chatController.deleteForEveryone);
+
+// Authoritative unread chat counters - Employee and above
+router.get('/unread-count', authenticate, authorizeRoles('Employee'), chatController.getUnreadChatCount);
+
+// Resolve a single chat participant (notification deep-link fallback)
+router.get('/user/:userId', authenticate, authorizeRoles('Employee'), chatController.getChatUser);
 
 module.exports = router;

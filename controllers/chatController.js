@@ -1,8 +1,10 @@
 const mongoose = require('mongoose');
 const Message = require('../models/Message');
 const User = require('../models/User');
-const webpush = require('web-push');
-const { isUserActivelyViewingConversation, isUserOnline } = require('../services/chatPresence');
+const {
+  handleChatNotification,
+  markChatNotificationsRead,
+} = require('./notificationController');
 
 // Reactions are stored as { userId, emoji, createdAt } sub-documents. The
 // populating options below are shared by every endpoint that returns messages
@@ -57,13 +59,10 @@ const sendMessage = async (req, res) => {
   try {
     const { receiverId, message } = req.body;
     const senderId = req.user._id;
-    const trimmedMessage = (message || '').trim();
+    const trimmedMessage = typeof message === 'string' ? message.trim() : '';
+    const hasFile = !!(req.files && req.files['file'] && req.files['file'].length > 0);
 
-    console.log('req.body:', req.body);
-    console.log('req.files:', req.files);
-    console.log('trimmedMessage:', trimmedMessage);
-
-    if (!receiverId || (!trimmedMessage && !(req.files && req.files['file'] && req.files['file'].length > 0))) {
+    if (!receiverId || (!trimmedMessage && !hasFile)) {
       return res.status(400).json({ message: 'Receiver and message are required if no file is attached' });
     }
 
@@ -72,8 +71,19 @@ const sendMessage = async (req, res) => {
       return res.status(400).json({ message: 'Invalid receiver ID format' });
     }
 
-    const receiver = await User.findById(receiverId);
-    if (!receiver) {
+    const receiverIdStr = String(receiverId);
+    if (receiverIdStr === String(senderId)) {
+      return res.status(400).json({ message: 'You cannot send a message to yourself' });
+    }
+
+    if (trimmedMessage.length > 4000) {
+      return res.status(400).json({ message: 'Message is too long' });
+    }
+
+    const receiver = await User.findById(receiverId).select(
+      'firstName lastName photo role status pushSubscriptions'
+    );
+    if (!receiver || receiver.status === 'Deleted') {
       return res.status(404).json({ message: 'Receiver not found' });
     }
 
@@ -84,7 +94,7 @@ const sendMessage = async (req, res) => {
     };
 
     // Handle file upload
-    if (req.files && req.files['file'] && req.files['file'].length > 0) {
+    if (hasFile) {
       const file = req.files['file'][0];
       messageData.file = {
         name: file.originalname,
@@ -94,85 +104,58 @@ const sendMessage = async (req, res) => {
       };
     }
 
-    console.log('messageData:', messageData);
-
     const newMessage = new Message(messageData);
     await newMessage.save();
 
-    // Determine notification behavior based on recipient's presence
-    const receiverIdStr = String(receiverId);
-    const isReceiverOnline = isUserOnline(receiverIdStr);
-
-    // Emit to receiver via socket (always deliver in real-time)
     const io = req.app.get('io');
-    io.to(receiverIdStr).emit('newMessage', {
+    const senderIdStr = String(senderId);
+    const payload = {
       _id: newMessage._id.toString(),
-      sender: { _id: senderId.toString(), firstName: req.user.firstName, lastName: req.user.lastName, photo: req.user.photo },
+      sender: {
+        _id: senderIdStr,
+        firstName: req.user.firstName,
+        lastName: req.user.lastName,
+        photo: req.user.photo,
+      },
       receiver: receiverIdStr,
       message: trimmedMessage,
       file: messageData.file,
       createdAt: newMessage.createdAt,
       read: false,
       reactions: [],
-    });
+    };
 
-    // Determine if we should also send a persistent notification
-    let shouldSendPersistentNotification = false;
-
-    if (isReceiverOnline) {
-      // Check if receiver is actively viewing the relevant conversation
-      const isViewingConversation = isUserActivelyViewingConversation(receiverIdStr, senderId);
-
-      if (isViewingConversation) {
-        // Recipient is online AND viewing the relevant conversation - no separate notification
-        // The real-time socket delivery is sufficient
-        shouldSendPersistentNotification = false;
-      } else {
-        // Recipient is online but viewing another section or different conversation
-        // Send a persistent in-app notification
-        shouldSendPersistentNotification = true;
-      }
-    } else {
-      // Recipient is offline - persistent notification for later delivery
-      shouldSendPersistentNotification = true;
+    // Deliver live to every recipient session and to the sender's other
+    // tabs/devices. The sending tab de-duplicates by message id.
+    if (io) {
+      io.to(receiverIdStr).emit('newMessage', payload);
+      io.to(senderIdStr).emit('newMessage', payload);
     }
 
-    // Send persistent notification if needed
-    if (shouldSendPersistentNotification) {
-      const employee = await User.findById(receiverId);
-      if (employee && employee.pushSubscriptions && employee.pushSubscriptions.length > 0) {
-        const notificationPayload = {
-          title: '💬 New Message',
-          body: `${req.user.firstName}: ${trimmedMessage || ' '}`,
-          icon: '/favicon.ico',
-          badge: '/favicon.ico',
-          url: '/chat',
-          data: {
-            type: 'chat_message',
-            senderId: senderId,
-            messageId: newMessage._id,
-            link: '/chat',
-          },
-        };
+    // Persist the notification first (when required), then deliver it. This is
+    // deliberately independent of socket delivery so an offline recipient
+    // still has the notification waiting on their next login.
+    await handleChatNotification({
+      sender: req.user,
+      recipient: receiver,
+      messageId: newMessage._id,
+      message: trimmedMessage,
+      fileName: messageData.file?.name,
+      io,
+    });
 
-        const promises = employee.pushSubscriptions.map(subscription =>
-          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
-            .catch(error => {
-              if (error.statusCode === 410) {
-                User.findByIdAndUpdate(receiverId, {
-                  $pull: { pushSubscriptions: subscription }
-                }).exec();
-              }
-            })
-        );
-        await Promise.all(promises);
-      }
+    // Keep the recipient's unread chat counter authoritative.
+    if (io) {
+      const totalUnread = await Message.countDocuments({
+        receiver: receiverId,
+        read: false,
+      });
+      io.to(receiverIdStr).emit('chat:unread:update', { totalUnread });
     }
 
     res.status(201).json({ message: 'Message sent successfully', data: newMessage });
   } catch (error) {
     console.error('Error sending message:', error.message);
-    console.error('Error stack:', error.stack);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -216,34 +199,99 @@ const getChatUsers = async (req, res) => {
   try {
     const currentUserId = req.user._id;
 
-    const messages = await Message.find({
-      $or: [
-        { sender: currentUserId },
-        { receiver: currentUserId }
-      ]
-    }).populate('sender', 'firstName lastName email photo').populate('receiver', 'firstName lastName email photo').sort({ createdAt: -1 });
+    const [messages, unreadBySender] = await Promise.all([
+      Message.find({
+        $or: [
+          { sender: currentUserId },
+          { receiver: currentUserId }
+        ]
+      })
+        .populate('sender', 'firstName lastName email photo role')
+        .populate('receiver', 'firstName lastName email photo role')
+        .sort({ createdAt: -1 }),
+      Message.aggregate([
+        { $match: { receiver: currentUserId, read: false } },
+        { $group: { _id: '$sender', count: { $sum: 1 } } },
+      ]),
+    ]);
+
+    const unreadMap = new Map(
+      unreadBySender.map((row) => [String(row._id), row.count])
+    );
 
     const chatUsers = new Map();
 
     messages.forEach(msg => {
+      if (!msg.sender || !msg.receiver) return;
       const otherUser = msg.sender._id.toString() === currentUserId.toString() ? msg.receiver : msg.sender;
-      if (!chatUsers.has(otherUser._id.toString())) {
-        chatUsers.set(otherUser._id.toString(), {
-          _id: otherUser._id.toString(),
+      if (!otherUser) return;
+      const otherUserId = otherUser._id.toString();
+      if (!chatUsers.has(otherUserId)) {
+        chatUsers.set(otherUserId, {
+          _id: otherUserId,
           firstName: otherUser.firstName,
           lastName: otherUser.lastName,
           email: otherUser.email,
           photo: otherUser.photo,
+          role: otherUser.role,
           lastMessage: msg.message,
           lastMessageTime: msg.createdAt,
+          unreadCount: unreadMap.get(otherUserId) || 0,
         });
       }
     });
 
-    res.json({ chatUsers: Array.from(chatUsers.values()) });
+    const users = Array.from(chatUsers.values());
+    const totalUnread = users.reduce((sum, user) => sum + (user.unreadCount || 0), 0);
+
+    res.json({ chatUsers: users, totalUnread });
   } catch (error) {
     console.error('Error fetching chat users:', error);
     res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Resolve a single chat participant. Used when a notification is clicked for a
+// conversation that does not exist in the sidebar yet (first ever message).
+const getChatUser = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const currentUserId = req.user._id;
+
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: 'Invalid user ID format' });
+    }
+    if (String(userId) === String(currentUserId)) {
+      return res.status(400).json({ message: 'Invalid conversation' });
+    }
+
+    const user = await User.findOne({
+      _id: userId,
+      status: { $ne: 'Deleted' },
+    }).select('firstName lastName email photo role');
+
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const unreadCount = await Message.countDocuments({
+      sender: userId,
+      receiver: currentUserId,
+      read: false,
+    });
+
+    return res.json({
+      user: {
+        _id: user._id.toString(),
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        photo: user.photo,
+        role: user.role,
+        unreadCount,
+      },
+    });
+  } catch (error) {
+    console.error('Error fetching chat user:', error);
+    return res.status(500).json({ message: 'Server error' });
   }
 };
 
@@ -253,14 +301,84 @@ const markAsRead = async (req, res) => {
     const { userId } = req.params;
     const currentUserId = req.user._id;
 
-    await Message.updateMany(
-      { sender: userId, receiver: currentUserId, read: false },
-      { read: true }
-    );
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ message: 'Invalid user ID format' });
+    }
 
-    res.json({ message: 'Messages marked as read' });
+    // Capture the ids first so both participants can update their read ticks
+    // without refetching the whole conversation.
+    const unreadMessages = await Message.find({
+      sender: userId,
+      receiver: currentUserId,
+      read: false,
+    }).select('_id');
+
+    const messageIds = unreadMessages.map((message) => String(message._id));
+
+    if (messageIds.length) {
+      await Message.updateMany(
+        { _id: { $in: messageIds } },
+        { read: true }
+      );
+    }
+
+    const io = req.app.get('io');
+
+    if (io && messageIds.length) {
+      const readPayload = {
+        messageIds,
+        readerId: String(currentUserId),
+        senderId: String(userId),
+        conversationId: String(currentUserId),
+      };
+      // Notify both sides (sender's read receipts + reader's other tabs).
+      io.to(String(userId)).to(String(currentUserId)).emit(
+        'chat:message:read',
+        readPayload
+      );
+
+      const totalUnread = await Message.countDocuments({
+        receiver: currentUserId,
+        read: false,
+      });
+      io.to(String(currentUserId)).emit('chat:unread:update', { totalUnread });
+    }
+
+    // A conversation being opened also clears its chat notifications.
+    await markChatNotificationsRead({
+      userId: currentUserId,
+      senderId: userId,
+      io,
+    });
+
+    res.json({ message: 'Messages marked as read', messageIds });
   } catch (error) {
     console.error('Error marking messages as read:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+};
+
+// Authoritative unread chat counters for the signed-in user.
+const getUnreadChatCount = async (req, res) => {
+  try {
+    const currentUserId = req.user._id;
+    const [totalUnread, bySender] = await Promise.all([
+      Message.countDocuments({ receiver: currentUserId, read: false }),
+      Message.aggregate([
+        { $match: { receiver: currentUserId, read: false } },
+        { $group: { _id: '$sender', count: { $sum: 1 } } },
+      ]),
+    ]);
+
+    res.json({
+      totalUnread,
+      conversations: bySender.map((row) => ({
+        userId: String(row._id),
+        unreadCount: row.count,
+      })),
+    });
+  } catch (error) {
+    console.error('Error fetching unread chat count:', error);
     res.status(500).json({ message: 'Server error' });
   }
 };
@@ -440,4 +558,15 @@ const searchUsers = async (req, res) => {
   }
 };
 
-module.exports = { sendMessage, getMessages, getChatUsers, markAsRead, searchUsers, deleteForMe, deleteForEveryone, toggleReaction };
+module.exports = {
+  sendMessage,
+  getMessages,
+  getChatUsers,
+  getChatUser,
+  getUnreadChatCount,
+  markAsRead,
+  searchUsers,
+  deleteForMe,
+  deleteForEveryone,
+  toggleReaction,
+};

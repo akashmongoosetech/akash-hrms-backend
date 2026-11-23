@@ -1,4 +1,5 @@
 const Blog = require('../models/Blog');
+const { notifyAllExceptActor } = require('./notificationController');
 
 // Get all blogs with pagination
 const getBlogs = async (req, res) => {
@@ -104,6 +105,31 @@ const createBlog = async (req, res) => {
     const blog = new Blog(blogData);
     await blog.save();
 
+    // Notify all users except the actor only when the blog is actually
+    // published. Draft creation is an internal authoring step.
+    const actorName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'An administrator';
+    if (blog.status === 'Published') {
+      await notifyAllExceptActor({
+        actor: req.user,
+        type: 'blog_created',
+        title: 'New Blog Published',
+        message: `${actorName} has published a new blog: ${title}.`,
+        data: {
+          action: 'created',
+          blogId: blog._id,
+          blogTitle: blog.title,
+          actorId: req.user._id,
+          actorName,
+          link: `/blogs/${blog.slug}`,
+        },
+        entityType: 'Blog',
+        entityId: blog._id,
+        io: req.app.get('io'),
+        pushTitle: '📝 New Blog Published',
+        pushUrl: `/blogs/${blog.slug}`,
+      });
+    }
+
     res.status(201).json({ message: 'Blog created successfully', blog });
   } catch (err) {
     console.error(err);
@@ -156,6 +182,9 @@ const updateBlog = async (req, res) => {
       }
     }
 
+    const previousBlog = await Blog.findOne({ slug }).select('status title slug');
+    if (!previousBlog) return res.status(404).json({ message: 'Blog not found' });
+
     const blog = await Blog.findOneAndUpdate(
       { slug },
       updates,
@@ -163,6 +192,33 @@ const updateBlog = async (req, res) => {
     ).populate('author', 'firstName lastName email photo');
 
     if (!blog) return res.status(404).json({ message: 'Blog not found' });
+
+    // Notify all users except the actor, but only for published content.
+    // Draft edits, or edits to a blog that has never been published, stay
+    // internal and must not produce company-wide notifications.
+    const relevantStatusChange = blog.status === 'Published';
+    const actorName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'An administrator';
+    if (relevantStatusChange) {
+      await notifyAllExceptActor({
+        actor: req.user,
+        type: 'blog_updated',
+        title: 'Blog Updated',
+        message: `${actorName} has updated the blog: ${blog.title}.`,
+        data: {
+          action: 'updated',
+          blogId: blog._id,
+          blogTitle: blog.title,
+          actorId: req.user._id,
+          actorName,
+          link: `/blogs/${blog.slug}`,
+        },
+        entityType: 'Blog',
+        entityId: blog._id,
+        io: req.app.get('io'),
+        pushTitle: '📝 Blog Updated',
+        pushUrl: `/blogs/${blog.slug}`,
+      });
+    }
 
     res.json({ message: 'Blog updated successfully', blog });
   } catch (err) {
@@ -179,6 +235,31 @@ const deleteBlog = async (req, res) => {
     const blog = await Blog.findOneAndDelete({ slug });
 
     if (!blog) return res.status(404).json({ message: 'Blog not found' });
+
+    // Notify all users except the actor, but only when a published blog is
+    // removed. Deleting a draft is an internal authoring step.
+    const actorName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'An administrator';
+    if (blog.status === 'Published') {
+      await notifyAllExceptActor({
+        actor: req.user,
+        type: 'blog_deleted',
+        title: 'Blog Deleted',
+        message: `${actorName} has deleted the blog: ${blog.title}.`,
+        data: {
+          action: 'deleted',
+          blogId: blog._id,
+          blogTitle: blog.title,
+          actorId: req.user._id,
+          actorName,
+          link: '/blog',
+        },
+        entityType: 'Blog',
+        entityId: blog._id,
+        io: req.app.get('io'),
+        pushTitle: '🗑️ Blog Removed',
+        pushUrl: '/blog',
+      });
+    }
 
     res.json({ message: 'Blog deleted successfully' });
   } catch (err) {

@@ -1,6 +1,6 @@
 const Project = require('../models/Project');
 const User = require('../models/User');
-const webpush = require('web-push');
+const { notifyUsers } = require('./notificationController');
 
 const getProjects = async (req, res) => {
   try {
@@ -75,52 +75,31 @@ const createProject = async (req, res) => {
       .populate('client', 'name email profile status')
       .populate({ path: 'teamMembers', select: 'firstName lastName email photo', match: { status: 'Active' } });
 
-    // Get all employees to send push notifications
-    const employees = await User.find({ role: 'Employee' });
+    // Notify all employees assigned to the newly created project
+    // (employees are populated from the teamMembers field, but project also has its own teamMembers)
+    const assignedEmployees = populatedProject.teamMembers || [];
 
-    // Emit real-time notification to all employees
-    const io = req.app.get('io');
-    employees.forEach(employee => {
-      io.emit(`project-notification-${employee._id}`, {
-        type: 'new_project',
-        message: `New project: ${name}`,
-        project: populatedProject
-      });
-    });
-
-    // Send push notifications to all employees
-    const notificationPayload = {
-      title: '🚀 New Project Added',
-      body: `${name} project has been created`,
-      icon: '/favicon.ico',
-      badge: '/favicon.ico',
-      url: '/projects',
+    await notifyUsers({
+      recipients: assignedEmployees,
+      exclude: req.user._id,
+      type: 'project_created',
+      title: 'New Project',
+      message: `You have been added to the project ${name} by ${req.user.firstName} ${req.user.lastName}.`,
       data: {
+        action: 'created',
         projectId: populatedProject._id,
-        type: 'new_project'
-      }
-    };
-
-    // Send push notifications to all subscribed employees
-    const pushPromises = employees.map(async (employee) => {
-      if (employee.pushSubscriptions && employee.pushSubscriptions.length > 0) {
-        const promises = employee.pushSubscriptions.map(subscription =>
-          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
-            .catch(error => {
-              // Remove invalid subscriptions
-              if (error.statusCode === 410) {
-                User.findByIdAndUpdate(employee._id, {
-                  $pull: { pushSubscriptions: subscription }
-                }).exec();
-              }
-            })
-        );
-        return Promise.all(promises);
-      }
+        projectName: populatedProject.name,
+        adminId: req.user._id,
+        adminName: `${req.user.firstName} ${req.user.lastName}`,
+        link: '/project',
+      },
+      actor: req.user,
+      entityType: 'Project',
+      entityId: populatedProject._id,
+      io: req.app.get('io'),
+      pushTitle: '🚀 New Project Added',
+      pushUrl: '/project',
     });
-
-    // Execute all push notification promises
-    await Promise.all(pushPromises);
 
     res.status(201).json({ message: 'Project created successfully', project: populatedProject });
   } catch (err) {
@@ -134,56 +113,73 @@ const updateProject = async (req, res) => {
     const { id } = req.params;
     const updates = req.body;
 
+    // Read the current assignments BEFORE applying the update so newly added
+    // members can be detected reliably.
+    const existingProject = await Project.findById(id).select('teamMembers name');
+    if (!existingProject) return res.status(404).json({ message: 'Project not found' });
+    const previousAssignees = (existingProject.teamMembers || []).map((member) => String(member));
+
     const project = await Project.findByIdAndUpdate(id, updates, { new: true, runValidators: true })
       .populate('client', 'name email profile status')
       .populate({ path: 'teamMembers', select: 'firstName lastName email photo', match: { status: 'Active' } });
     if (!project) return res.status(404).json({ message: 'Project not found' });
 
-    // Get all employees to send push notifications
-    const employees = await User.find({ role: 'Employee' });
+    const actorId = String(req.user._id);
+    const actorName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'An administrator';
 
-    const io = req.app.get('io');
-    employees.forEach(employee => {
-      io.emit(`project-notification-${employee._id}`, {
-        type: 'updated_project',
-        message: `Project updated: ${project.name}`,
-        project: project
-      });
-    });
+    // Only active, populated members receive notifications. Recipient ids come
+    // from the persisted project record, never from the request body.
+    const currentMembers = (project.teamMembers || [])
+      .map((member) => String(member?._id || member))
+      .filter((memberId) => memberId && memberId !== actorId);
 
-    // Send push notifications to all employees
-    const notificationPayload = {
-      title: '📝 Project Updated',
-      body: `${project.name} has been updated`,
-      icon: '/favicon.ico',
-      badge: '/favicon.ico',
-      url: '/projects',
-      data: {
-        projectId: project._id,
-        type: 'updated_project'
-      }
+    const newlyAssigned = currentMembers.filter((memberId) => !previousAssignees.includes(memberId));
+    const existingMembers = currentMembers.filter((memberId) => previousAssignees.includes(memberId));
+
+    const commonData = {
+      projectId: project._id,
+      projectName: project.name,
+      adminId: req.user._id,
+      adminName: actorName,
+      link: '/project',
     };
 
-    // Send push notifications to all subscribed employees
-    const pushPromises = employees.map(async (employee) => {
-      if (employee.pushSubscriptions && employee.pushSubscriptions.length > 0) {
-        const promises = employee.pushSubscriptions.map(subscription =>
-          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
-            .catch(error => {
-              // Remove invalid subscriptions
-              if (error.statusCode === 410) {
-                User.findByIdAndUpdate(employee._id, {
-                  $pull: { pushSubscriptions: subscription }
-                }).exec();
-              }
-            })
-        );
-        return Promise.all(promises);
-      }
-    });
+    // Employees already on the project hear about the update.
+    if (existingMembers.length) {
+      await notifyUsers({
+        recipients: existingMembers,
+        exclude: req.user._id,
+        type: 'project_updated',
+        title: 'Project Updated',
+        message: `The project ${project.name} has been updated by ${actorName}.`,
+        data: { ...commonData, action: 'updated' },
+        actor: req.user,
+        entityType: 'Project',
+        entityId: project._id,
+        io: req.app.get('io'),
+        pushTitle: '📝 Project Updated',
+        pushUrl: '/project',
+      });
+    }
 
-    // Execute all push notification promises
-    await Promise.all(pushPromises);
+    // Newly assigned employees get a single assignment notification instead of
+    // both an update and an assignment message.
+    if (newlyAssigned.length) {
+      await notifyUsers({
+        recipients: newlyAssigned,
+        exclude: req.user._id,
+        type: 'project_updated',
+        title: 'New Project Assignment',
+        message: `You have been assigned to the project ${project.name} by ${actorName}.`,
+        data: { ...commonData, action: 'new_assignment' },
+        actor: req.user,
+        entityType: 'Project',
+        entityId: project._id,
+        io: req.app.get('io'),
+        pushTitle: '📝 New Project Assignment',
+        pushUrl: '/project',
+      });
+    }
 
     res.json({ message: 'Project updated successfully', project });
   } catch (err) {
@@ -199,51 +195,43 @@ const deleteProject = async (req, res) => {
     const project = await Project.findByIdAndDelete(id);
     if (!project) return res.status(404).json({ message: 'Project not found' });
 
-    // Get all employees to send push notifications
-    const employees = await User.find({ role: 'Employee' });
+    // Capture assigned employee IDs before deletion
+    const assignedEmployeesBeforeDelete = project.teamMembers || [];
 
-    const io = req.app.get('io');
-    employees.forEach(employee => {
-      io.emit(`project-notification-${employee._id}`, {
-        type: 'deleted_project',
-        message: `Project deleted: ${project.name}`,
-        project: { _id: id, name: project.name }
+    // Notify employees who were assigned to the project before deletion
+    const deletedEmployees = await User.find({
+      _id: { $in: assignedEmployeesBeforeDelete },
+      status: 'Active',
+    }).select('_id firstName lastName role pushSubscriptions').lean();
+
+    // Notify assigned employees (excluding the actor who deleted the project)
+    if (deletedEmployees.length) {
+      const actorExcluded = deletedEmployees.filter(
+        (e) => String(e._id) !== String(req.user._id)
+      );
+
+      await notifyUsers({
+        recipients: actorExcluded.map((e) => e._id),
+        exclude: req.user._id,
+        type: 'project_deleted',
+        title: 'Project Deleted',
+        message: `The project ${project.name} has been deleted by ${req.user.firstName} ${req.user.lastName}.`,
+        data: {
+          action: 'deleted',
+          projectId: id,
+          projectName: project.name,
+          adminId: req.user._id,
+          adminName: `${req.user.firstName} ${req.user.lastName}`,
+          link: '/project',
+        },
+        actor: req.user,
+        entityType: 'Project',
+        entityId: project._id,
+        io: req.app.get('io'),
+        pushTitle: '🗑️ Project Removed',
+        pushUrl: '/project',
       });
-    });
-
-    // Send push notifications to all employees
-    const notificationPayload = {
-      title: '🗑️ Project Removed',
-      body: `${project.name} has been deleted`,
-      icon: '/favicon.ico',
-      badge: '/favicon.ico',
-      url: '/projects',
-      data: {
-        projectId: id,
-        type: 'deleted_project'
-      }
-    };
-
-    // Send push notifications to all subscribed employees
-    const pushPromises = employees.map(async (employee) => {
-      if (employee.pushSubscriptions && employee.pushSubscriptions.length > 0) {
-        const promises = employee.pushSubscriptions.map(subscription =>
-          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
-            .catch(error => {
-              // Remove invalid subscriptions
-              if (error.statusCode === 410) {
-                User.findByIdAndUpdate(employee._id, {
-                  $pull: { pushSubscriptions: subscription }
-                }).exec();
-              }
-            })
-        );
-        return Promise.all(promises);
-      }
-    });
-
-    // Execute all push notification promises
-    await Promise.all(pushPromises);
+    }
 
     res.json({ message: 'Project deleted successfully' });
   } catch (err) {

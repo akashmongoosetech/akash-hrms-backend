@@ -1,6 +1,12 @@
 const Leave = require('../models/Leave');
-const User = require('../models/User');
-const webpush = require('web-push');
+const Team = require('../models/Team');
+const { notifyUsers, notifySpecificUser, getUserIdsByRoles, getManagerIdsForEmployee } = require('./notificationController');
+
+const formatLeaveDate = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toISOString().slice(0, 10);
+};
 
 const requestLeave = async (req, res) => {
   try {
@@ -33,64 +39,53 @@ const requestLeave = async (req, res) => {
 
     await leave.save();
 
-     // Send notification to admins and super admins
-    const io = req.app.get('io');
-    const User = require('../models/User');
+    // Notify all Admins, all SuperAdmins and the applicant's assigned
+    // manager(s). The applicant is always excluded by the service, and the
+    // recipient list is resolved from the database, never from the client.
+    const applicantName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'Employee';
+    const startLabel = formatLeaveDate(leave.startDate);
+    const endLabel = formatLeaveDate(leave.endDate);
+    const managerIds = await getManagerIdsForEmployee(req.user._id);
+    const adminIds = await getUserIdsByRoles(['Admin', 'SuperAdmin']);
+    const recipients = [...adminIds, ...managerIds];
 
-    // Send push notifications to admins and super admins
-    const admins = await User.find({ role: { $in: ['Admin', 'SuperAdmin'] } });
-
-    admins.forEach(admin => {
-      io.emit(`leave-notification-${admin._id}`, {
-        message: `New leave request from ${req.user.firstName} ${req.user.lastName} (${leaveType})`,
-        type: 'leave_request',
-        leaveId: leave._id,
-        employeeId: req.user._id,
-        employeeName: `${req.user.firstName} ${req.user.lastName}`,
-        leaveType,
-        startDate,
-        endDate,
-        reason,
-        createdAt: new Date()
+    if (recipients.length) {
+      await notifyUsers({
+        recipients,
+        exclude: req.user._id,
+        type: 'leave_applied',
+        title: 'New Leave Application',
+        message: `${applicantName} has submitted a new leave application for ${startLabel} to ${endLabel}.`,
+        data: {
+          action: 'applied',
+          leaveId: leave._id,
+          leaveType: leave.leaveType,
+          startDate: leave.startDate,
+          endDate: leave.endDate,
+          daysRequested: leave.daysRequested,
+          reason: leave.reason,
+          employeeId: req.user._id,
+          employeeName: applicantName,
+          managerIds,
+          actorId: req.user._id,
+          actorName: applicantName,
+          link: '/leave',
+        },
+        actor: req.user,
+        entityType: 'Leave',
+        entityId: leave._id,
+        io: req.app.get('io'),
+        pushTitle: '📝 New Leave Request',
+        pushUrl: '/leave',
       });
-    });
-
-    // Send push notifications to all subscribed admins
-    const pushPromises = admins.map(async (admin) => {
-      if (admin.pushSubscriptions && admin.pushSubscriptions.length > 0) {
-        const promises = admin.pushSubscriptions.map(subscription =>
-          webpush.sendNotification(subscription, JSON.stringify({
-            title: '📝 New Leave Request',
-            body: `${req.user.firstName} ${req.user.lastName} requested ${leaveType} leave`,
-            icon: '/favicon.ico',
-            badge: '/favicon.ico',
-            url: '/leave',
-            data: {
-              leaveId: leave._id,
-              type: 'leave_request'
-            }
-          }))
-            .catch(error => {
-              // Remove invalid subscriptions
-              if (error.statusCode === 410) {
-                User.findByIdAndUpdate(admin._id, {
-                  $pull: { pushSubscriptions: subscription }
-                }).exec();
-              }
-            })
-        );
-        return Promise.all(promises);
-      }
-    });
-
-    // Execute all push notification promises
-    await Promise.all(pushPromises);
+    }
 
     // Populate the leave with employee data for socket emission
     const populatedLeave = await Leave.findById(leave._id).populate({ path: 'employee', select: 'firstName lastName email photo' });
 
     // Emit to all connected clients for live updates
-    io.emit('leave-created', populatedLeave);
+    const io = req.app.get('io');
+    if (io) io.emit('leave-created', populatedLeave);
 
     res.status(201).json({ message: 'Leave request submitted successfully', leave: populatedLeave });
   } catch (err) {
@@ -153,6 +148,19 @@ const updateLeaveStatus = async (req, res) => {
     const leave = await Leave.findById(id).populate({ path: 'employee', select: 'firstName lastName email photo' });
     if (!leave) return res.status(404).json({ message: 'Leave not found' });
 
+    // Managers may only decide on leave requests for members of their own
+    // teams. Admins and SuperAdmins keep full access.
+    if (req.user.role === 'Manager') {
+      const ownsRequest = await Team.exists({
+        manager: req.user._id,
+        status: 'Active',
+        teamMembers: leave.employee?._id || leave.employee,
+      });
+      if (!ownsRequest) {
+        return res.status(403).json({ message: 'Forbidden: this employee is not in your team' });
+      }
+    }
+
     const oldStatus = leave.status;
     leave.status = status;
     if (status === 'Approved') {
@@ -175,53 +183,43 @@ const updateLeaveStatus = async (req, res) => {
       .populate({ path: 'approvedBy', select: 'firstName lastName' })
       .populate({ path: 'rejectedBy', select: 'firstName lastName' });
 
-    // Send push notification to employee if status changed
+    // Send notification ONLY to the employee when status actually changes
     if (oldStatus !== status) {
-      const io = req.app.get('io');
-      io.emit(`leave-status-notification-${leave.employee._id}`, {
-        message: `Your leave request (${leave.leaveType}) has been ${status.toLowerCase()}`,
-        type: 'leave_status_update',
-        leaveId: leave._id,
-        status,
-        leaveType: leave.leaveType,
-        startDate: leave.startDate,
-        endDate: leave.endDate,
-        updatedBy: `${req.user.firstName} ${req.user.lastName}`,
-        comments,
-        createdAt: new Date()
+      const approverName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'An administrator';
+      const startLabel = formatLeaveDate(leave.startDate);
+      const endLabel = formatLeaveDate(leave.endDate);
+
+      const messageByStatus = {
+        Approved: `Your leave application has been approved by ${approverName}.`,
+        Rejected: `Your leave application has been rejected by ${approverName}.`,
+        Pending: `Your leave application status has been changed to Pending by ${approverName}.`,
+      };
+
+      await notifySpecificUser({
+        userId: leave.employee?._id || leave.employee,
+        actor: req.user,
+        type: 'leave_status_updated',
+        title: `Leave ${status}`,
+        message: messageByStatus[status] || `Your leave application status has been changed to ${status} by ${approverName}.`,
+        data: {
+          action: 'status_updated',
+          leaveId: leave._id,
+          leaveType: leave.leaveType,
+          startDate: leave.startDate,
+          endDate: leave.endDate,
+          status,
+          previousStatus: oldStatus,
+          approverName,
+          actorId: req.user._id,
+          actorName: approverName,
+          link: '/leave',
+        },
+        entityType: 'Leave',
+        entityId: leave._id,
+        io: req.app.get('io'),
+        pushTitle: status === 'Approved' ? '✅ Leave Approved' : status === 'Rejected' ? '❌ Leave Rejected' : '⏳ Leave Status Updated',
+        pushUrl: '/leave',
       });
-
-      
-      const employee = await User.findById(leave.employee);
-      if (employee && employee.role === 'Employee') {
-        const notificationPayload = {
-          title: status === 'Approved' ? '✅ Leave Approved' : status === 'Rejected' ? '❌ Leave Rejected' : '⏳ Leave Status Updated',
-          body: `Your ${leave.leaveType} leave request has been ${status.toLowerCase()}`,
-          icon: '/favicon.ico',
-          badge: '/favicon.ico',
-          url: '/leave',
-          data: {
-            leaveId: leave._id,
-            type: 'leave_status_update'
-          }
-        };
-
-        // Send push notification to the employee
-        if (employee.pushSubscriptions && employee.pushSubscriptions.length > 0) {
-          const promises = employee.pushSubscriptions.map(subscription =>
-            webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
-              .catch(error => {
-                // Remove invalid subscriptions
-                if (error.statusCode === 410) {
-                  User.findByIdAndUpdate(employee._id, {
-                    $pull: { pushSubscriptions: subscription }
-                  }).exec();
-                }
-              })
-          );
-          await Promise.all(promises);
-        }
-      }
     }
 
     // Emit to all connected clients for live updates

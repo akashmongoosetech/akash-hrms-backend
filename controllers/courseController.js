@@ -1,9 +1,7 @@
-const Course = require('../models/Course');
+﻿const Course = require('../models/Course');
 const Category = require('../models/Category');
 const User = require('../models/User');
-const VideoProgress = require('../models/VideoProgress');
-const CourseNotes = require('../models/CourseNotes');
-const CourseProgress = require('../models/CourseProgress');
+const { notifyAllExceptActor } = require('./notificationController');
 const PDFDocument = require('pdfkit');
 const https = require('https');
 
@@ -112,6 +110,28 @@ const createCourse = async (req, res) => {
     await course.populate('categoryDetails', 'name');
     await course.populate('createdByDetails', 'firstName lastName email');
 
+    // Notify all users except the actor (admin/superadmin who created the course)
+    const actorName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'An administrator';
+    await notifyAllExceptActor({
+      actor: req.user,
+      type: 'course_created',
+      title: 'New Course Added',
+      message: `${actorName} has added a new course: ${title}.`,
+      data: {
+        action: 'created',
+        courseId: course._id,
+        courseName: course.title,
+        actorId: req.user._id,
+        actorName,
+        link: '/learning',
+      },
+      entityType: 'Course',
+      entityId: course._id,
+      io: req.app.get('io'),
+      pushTitle: 'ðŸ“š New Course Added',
+      pushUrl: '/learning',
+    });
+
     res.status(201).json({
       message: 'Course created successfully',
       course
@@ -170,6 +190,28 @@ const updateCourse = async (req, res) => {
       .populate('categoryDetails', 'name')
       .populate('createdByDetails', 'firstName lastName email');
 
+    // Notify all users except the actor (admin/superadmin who updated the course)
+    const actorName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'An administrator';
+    await notifyAllExceptActor({
+      actor: req.user,
+      type: 'course_updated',
+      title: 'Course Updated',
+      message: `${actorName} has updated the course: ${updatedCourse.title}.`,
+      data: {
+        action: 'updated',
+        courseId: course._id,
+        courseName: updatedCourse.title,
+        actorId: req.user._id,
+        actorName,
+        link: '/learning',
+      },
+      entityType: 'Course',
+      entityId: course._id,
+      io: req.app.get('io'),
+      pushTitle: 'ðŸ“ Course Updated',
+      pushUrl: '/learning',
+    });
+
     res.json({
       message: 'Course updated successfully',
       course: updatedCourse
@@ -188,6 +230,28 @@ const deleteCourse = async (req, res) => {
     if (!course) return res.status(404).json({ message: 'Course not found' });
 
     await Course.findByIdAndDelete(id);
+
+    // Notify all users except the actor (admin/superadmin who deleted the course)
+    const actorName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'An administrator';
+    await notifyAllExceptActor({
+      actor: req.user,
+      type: 'course_deleted',
+      title: 'Course Deleted',
+      message: `${actorName} has deleted the course: ${course.title}.`,
+      data: {
+        action: 'deleted',
+        courseId: course._id,
+        courseName: course.title,
+        actorId: req.user._id,
+        actorName,
+        link: '/learning',
+      },
+      entityType: 'Course',
+      entityId: course._id,
+      io: req.app.get('io'),
+      pushTitle: 'ðŸ—‘ï¸ Course Deleted',
+      pushUrl: '/learning',
+    });
 
     res.json({ message: 'Course deleted successfully' });
   } catch (err) {

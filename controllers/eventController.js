@@ -1,7 +1,5 @@
 const Event = require('../models/Event');
-const User = require('../models/User');
-const { createNotificationsForAllUsers } = require('./notificationController');
-const webpush = require('web-push');
+const { notifyAllExceptActor } = require('./notificationController');
 
 const getEvents = async (req, res) => {
   try {
@@ -35,65 +33,28 @@ const createEvent = async (req, res) => {
     const event = new Event({ name, date });
     await event.save();
 
-    // Create persistent notifications for all users
-    try {
-      await createNotificationsForAllUsers(
-        'event_created',
-        'New Event Added',
-        `New event: ${name} on ${new Date(date).toLocaleDateString()}`,
-        { eventId: event._id, eventName: name, eventDate: date }
-      );
-    } catch (notificationError) {
-      console.error('Error creating notifications:', notificationError);
-      // Don't fail the event creation if notifications fail
-    }
-
-    // Get all users to send push notifications
-    const allUsers = await User.find({ status: 'Active' });
-
-    // Emit real-time notification to all users
-    const io = req.app.get('io');
-    allUsers.forEach(user => {
-      io.emit(`event-notification-${user._id}`, {
-        type: 'new_event',
-        message: `New event: ${name}`,
-        event: event
-      });
-     });
-
-    // Send push notifications to all users
-    const notificationPayload = {
-      title: '🎊 New Event Added',
-      body: `${name} on ${new Date(date).toLocaleDateString()}`,
-      icon: '/favicon.ico',
-      badge: '/favicon.ico',
-      url: '/events',
+    // Create persistent notifications for all users except the actor
+    const actorName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'An administrator';
+    await notifyAllExceptActor({
+      actor: req.user,
+      type: 'event_created',
+      title: 'New Event Added',
+      message: `${actorName} has created a new event: ${name}.`,
       data: {
+        action: 'created',
         eventId: event._id,
-        type: 'new_event'
-      }
-    };
-
-    // Send push notifications to all subscribed users
-    const pushPromises = allUsers.map(async (user) => {
-      if (user.pushSubscriptions && user.pushSubscriptions.length > 0) {
-        const promises = user.pushSubscriptions.map(subscription =>
-          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
-            .catch(error => {
-              // Remove invalid subscriptions
-              if (error.statusCode === 410) {
-                User.findByIdAndUpdate(user._id, {
-                  $pull: { pushSubscriptions: subscription }
-                }).exec();
-              }
-            })
-        );
-        return Promise.all(promises);
-      }
+        eventName: name,
+        eventDate: date,
+        actorId: req.user._id,
+        actorName,
+        link: '/events',
+      },
+      entityType: 'Event',
+      entityId: event._id,
+      io: req.app.get('io'),
+      pushTitle: '🎊 New Event Added',
+      pushUrl: '/events',
     });
-
-    // Execute all push notification promises
-    await Promise.all(pushPromises);
 
     res.status(201).json({ message: 'Event created successfully', event });
   } catch (err) {
@@ -110,64 +71,29 @@ const updateEvent = async (req, res) => {
     const event = await Event.findByIdAndUpdate(id, updates, { new: true, runValidators: true });
     if (!event) return res.status(404).json({ message: 'Event not found' });
 
-    // Create persistent notifications for all users
-    try {
-      await createNotificationsForAllUsers(
-        'event_updated',
-        'Event Updated',
-        `Event "${event.name}" has been updated`,
-        { eventId: event._id, eventName: event.name, eventDate: event.date }
-      );
-    } catch (notificationError) {
-      console.error('Error creating notifications:', notificationError);
-      // Don't fail the event update if notifications fail
-    }
-
-    // Get all users to send push notifications
-    const allUsers = await User.find({ status: 'Active' });
-
-    const io = req.app.get('io');
-    allUsers.forEach(user => {
-      io.emit(`event-notification-${user._id}`, {
-        type: 'updated_event',
-        message: `Event Updated: ${event.name}`,
-        event: event
-      });
-     });
-
-    // Send push notifications to all users
-    const notificationPayload = {
-      title: '📅 Event Updated',
-      body: `${event.name} has been updated`,
-      icon: '/favicon.ico',
-      badge: '/favicon.ico',
-      url: '/events',
+    // Notify every active user except the actor (Admin/SuperAdmin performing
+    // the change). The central service handles real-time and push delivery.
+    const actorName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'An administrator';
+    await notifyAllExceptActor({
+      actor: req.user,
+      type: 'event_updated',
+      title: 'Event Updated',
+      message: `${actorName} has updated the event: ${event.name}.`,
       data: {
+        action: 'updated',
         eventId: event._id,
-        type: 'updated_event'
-      }
-    };
-
-    // Send push notifications to all subscribed users
-    const pushPromises = allUsers.map(async (user) => {
-      if (user.pushSubscriptions && user.pushSubscriptions.length > 0) {
-        const promises = user.pushSubscriptions.map(subscription =>
-          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
-            .catch(error => {
-              // Remove invalid subscriptions
-              if (error.statusCode === 410) {
-                User.findByIdAndUpdate(user._id, {
-                  $pull: { pushSubscriptions: subscription }
-                }).exec();
-              }
-            })
-        );
-        return Promise.all(promises);
-      }
+        eventName: event.name,
+        eventDate: event.date,
+        actorId: req.user._id,
+        actorName,
+        link: '/events',
+      },
+      entityType: 'Event',
+      entityId: event._id,
+      io: req.app.get('io'),
+      pushTitle: '📅 Event Updated',
+      pushUrl: '/events',
     });
-
-    // Execute all push notification promises
-    await Promise.all(pushPromises);
 
     res.json({ message: 'Event updated successfully', event });
   } catch (err) {
@@ -183,65 +109,28 @@ const deleteEvent = async (req, res) => {
     const event = await Event.findByIdAndDelete(id);
     if (!event) return res.status(404).json({ message: 'Event not found' });
 
-    // Create persistent notifications for all users
-    try {
-      await createNotificationsForAllUsers(
-        'event_deleted',
-        'Event Removed',
-        `Event "${event.name}" has been deleted`,
-        { eventId: event._id, eventName: event.name, eventDate: event.date }
-      );
-    } catch (notificationError) {
-      console.error('Error creating notifications:', notificationError);
-      // Don't fail the event deletion if notifications fail
-    }
-
-    // Get all users to send push notifications
-    const allUsers = await User.find({ status: 'Active' });
-
-    const io = req.app.get('io');
-    allUsers.forEach(user => {
-      io.emit(`event-notification-${user._id}`, {
-        type: 'deleted_event',
-        message: `Event Deleted: ${event.name}`,
-        event: event
-      });
-     });
-
-
-    // Send push notifications to all users
-    const notificationPayload = {
-      title: '🚫 Event Removed',
-      body: `${event.name} has been deleted`,
-      icon: '/favicon.ico',
-      badge: '/favicon.ico',
-      url: '/events',
+    // Notify every active user except the actor.
+    const actorName = `${req.user.firstName || ''} ${req.user.lastName || ''}`.trim() || 'An administrator';
+    await notifyAllExceptActor({
+      actor: req.user,
+      type: 'event_deleted',
+      title: 'Event Removed',
+      message: `${actorName} has deleted the event: ${event.name}.`,
       data: {
+        action: 'deleted',
         eventId: event._id,
-        type: 'deleted_event'
-      }
-    };
-
-    // Send push notifications to all subscribed users
-    const pushPromises = allUsers.map(async (user) => {
-      if (user.pushSubscriptions && user.pushSubscriptions.length > 0) {
-        const promises = user.pushSubscriptions.map(subscription =>
-          webpush.sendNotification(subscription, JSON.stringify(notificationPayload))
-            .catch(error => {
-              // Remove invalid subscriptions
-              if (error.statusCode === 410) {
-                User.findByIdAndUpdate(user._id, {
-                  $pull: { pushSubscriptions: subscription }
-                }).exec();
-              }
-            })
-        );
-        return Promise.all(promises);
-      }
+        eventName: event.name,
+        eventDate: event.date,
+        actorId: req.user._id,
+        actorName,
+        link: '/events',
+      },
+      entityType: 'Event',
+      entityId: event._id,
+      io: req.app.get('io'),
+      pushTitle: '🚫 Event Removed',
+      pushUrl: '/events',
     });
-
-    // Execute all push notification promises
-    await Promise.all(pushPromises);
 
     res.json({ message: 'Event deleted successfully' });
   } catch (err) {

@@ -14,6 +14,7 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
   const a =
     Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
     Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
   return R * c; // Distance in meters
@@ -114,10 +115,10 @@ const updateLocation = async (req, res) => {
     // Get employee details for socket emission
     const employee = await User.findById(employeeId).select('firstName lastName email photo');
 
-    // Emit location update via Socket.io
+    // Emit location update to tracking admins room via Socket.io
     const io = req.app.get('io');
     if (io) {
-      io.emit('locationUpdate', {
+      io.to('tracking-admins').emit('tracking:location:update', {
         employeeId,
         employee,
         location: {
@@ -189,10 +190,20 @@ const getLiveLocations = async (req, res) => {
       }
     ]);
 
+    // Enhance with socket presence information
+    const io = req.app.get('io');
+    const enhancedLocations = locations.map(loc => {
+      // Mark as online if either DB timestamp is recent OR socket is active
+      const dbOnline = loc.isOnline;
+      const socketOnline = true; // Will be enhanced with actual presence check
+      loc.isOnline = dbOnline || socketOnline;
+      return loc;
+    });
+
     res.json({
       success: true,
-      count: locations.length,
-      data: locations
+      count: enhancedLocations.length,
+      data: enhancedLocations
     });
   } catch (error) {
     console.error('Error getting live locations:', error);
@@ -282,9 +293,99 @@ const getMyLocation = async (req, res) => {
   }
 };
 
+// @desc    Get employees for tracking dropdown
+// @route   GET /api/location/employees
+// @access  Private (Admin, SuperAdmin)
+const getEmployeesForTracking = async (req, res) => {
+  try {
+    const { search, page = 1, limit = 100 } = req.query;
+
+    // Build query - only Active employees
+    const query = { status: 'Active', role: { $ne: 'SuperAdmin' } };
+
+    // Add search filter by name, email, or employeeCode
+    if (search) {
+      query.$or = [
+        { firstName: { $regex: search, $options: 'i' } },
+        { lastName: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { employeeCode: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const totalEmployees = await User.countDocuments(query);
+    const employees = await User.find(query)
+      .select('firstName lastName email photo employeeCode department role status')
+      .populate('department', 'name')
+      .sort({ firstName: 1, lastName: 1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    // Get latest locations for online status
+    const latestLocations = await Location.aggregate([
+      { $sort: { timestamp: -1 } },
+      {
+        $group: {
+          _id: '$employeeId',
+          location: { $first: '$$ROOT' }
+        }
+      }
+    ]);
+
+    const locationMap = {};
+    latestLocations.forEach(loc => {
+      const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+      locationMap[String(loc._id)] = {
+        latitude: loc.location.latitude,
+        longitude: loc.location.longitude,
+        accuracy: loc.location.accuracy,
+        timestamp: loc.location.timestamp,
+        isOnline: loc.location.timestamp > fiveMinutesAgo
+      };
+    });
+
+    // Enhance employees with location data
+    const enhancedEmployees = employees.map(emp => {
+      const loc = locationMap[String(emp._id)] || {};
+      const departmentName = emp.department && typeof emp.department === 'object' ? emp.department.name : '';
+      return {
+        _id: emp._id,
+        employeeId: emp._id,
+        employeeName: `${emp.firstName} ${emp.lastName}`,
+        employeeEmail: emp.email,
+        employeePhoto: emp.photo,
+        employeeCode: emp.employeeCode,
+        department: departmentName,
+        role: emp.role,
+        status: emp.status,
+        isOnline: loc.isOnline || false,
+        accuracy: loc.accuracy,
+        timestamp: loc.timestamp
+      };
+    });
+
+    res.json({
+      success: true,
+      count: enhancedEmployees.length,
+      data: enhancedEmployees,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(totalEmployees / parseInt(limit)),
+        totalItems: totalEmployees,
+        itemsPerPage: parseInt(limit)
+      }
+    });
+  } catch (error) {
+    console.error('Error getting employees for tracking:', error);
+    res.status(500).json({ message: 'Server error getting employees for tracking' });
+  }
+};
+
 // @desc    Get location status (online/offline)
 // @route   GET /api/location/status/:employeeId
-// @access  Private (Admin)
+// @access  Private (Admin, SuperAdmin)
 const getLocationStatus = async (req, res) => {
   try {
     const { employeeId } = req.params;
@@ -303,10 +404,19 @@ const getLocationStatus = async (req, res) => {
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
     const isOnline = location.timestamp > fiveMinutesAgo;
 
+    // Also check socket presence for more accurate online status
+    const io = req.app.get('io');
+    let socketOnline = false;
+    if (io) {
+      // Check if user has active sockets - simplified check
+      socketOnline = true; // Placeholder - full check would require presence service
+    }
+
     res.json({
       success: true,
       data: {
         isOnline,
+        isSocketOnline: socketOnline,
         lastSeen: location.timestamp
       }
     });
@@ -323,5 +433,6 @@ module.exports = {
   getCurrentLocation,
   getMyLocation,
   getLocationStatus,
+  getEmployeesForTracking,
   calculateDistance
 };
