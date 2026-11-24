@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 
 const candidateSchema = new mongoose.Schema({
+  externalCareerId: { type: String, unique: true, sparse: true, index: true },
   name: { type: String, required: true },
   email: { type: String, required: true },
   phone: { type: String, required: true },
@@ -14,7 +15,9 @@ const candidateSchema = new mongoose.Schema({
     contentType: String,
     filename: String
   },
-  status: { type: String, default: 'pending' }
+  status: { type: String, default: 'pending' },
+  isDeleted: { type: Boolean, default: false, index: true },
+  deletedAt: { type: Date }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Candidate', candidateSchema);
